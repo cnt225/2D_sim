@@ -1,0 +1,111 @@
+{
+  "env_type": "circles",
+  "difficulty": "random",
+  "resolution": 0.05,
+  "noise_level": 0.01,
+  "workspace_bounds": [
+    -1,
+    11,
+    -1,
+    11
+  ],
+  "clustering_eps": 0.3,
+  "min_samples": 5,
+  "obstacle_type": "auto",
+  "num_points": 921,
+  "num_obstacles": 7,
+  "seed": 3065,
+  "environment_details": {
+    "environment_type": "circle_only",
+    "config": {
+      "num_obstacles": 7,
+      "obstacle_size_range": [
+        0.25,
+        0.45
+      ],
+      "density_level": "sparse",
+      "complexity_level": "complex",
+      "spatial_distribution": "line",
+      "workspace_utilization": 0.4403600791094632,
+      "min_distance_factor": 2.1317714339960774
+    },
+    "num_obstacles": 7,
+    "obstacles": [
+      {
+        "id": 0,
+        "position": [
+          5.2420220375061035,
+          6.77016544342041
+        ],
+        "radius": 0.30749961733818054,
+        "type": "circle"
+      },
+      {
+        "id": 1,
+        "position": [
+          1.7213499546051025,
+          5.837775230407715
+        ],
+        "radius": 0.33063772320747375,
+        "type": "circle"
+      },
+      {
+        "id": 2,
+        "position": [
+          4.320499897003174,
+          1.174472451210022
+        ],
+        "radius": 0.1299740970134735,
+        "type": "circle"
+      },
+      {
+        "id": 3,
+        "position": [
+          1.1224547624588013,
+          2.872354507446289
+        ],
+        "radius": 0.2704851031303406,
+        "type": "circle"
+      },
+      {
+        "id": 4,
+        "position": [
+          8.414814949035645,
+          1.314766764640808
+        ],
+        "radius": 0.28114619851112366,
+        "type": "circle"
+      },
+      {
+        "id": 5,
+        "position": [
+          8.71908187866211,
+          2.642805814743042
+        ],
+        "radius": 0.3904817998409271,
+        "type": "circle"
+      },
+      {
+        "id": 6,
+        "position": [
+          6.892040729522705,
+          0.9979737997055054
+        ],
+        "radius": 0.46041589975357056,
+        "type": "circle"
+      }
+    ],
+    "workspace_bounds": [
+      0,
+      10,
+      0,
+      8
+    ],
+    "robot_base_position": [
+      0,
+      0
+    ],
+    "generation_timestamp": null
+  },
+  "generation_timestamp": "2025-07-14T16:28:08.227152"
+}

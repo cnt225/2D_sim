@@ -1,0 +1,62 @@
+# Rigid Body Configurations for Simulation
+# SE(3) poses: (x, y, z=0, roll=0, pitch=0, yaw)
+# All rigid bodies are ellipses with configurable dimensions
+
+rigid_bodies:
+  0:  # Small ellipse
+    name: "small_ellipse"
+    type: "ellipse"
+    semi_major_axis: 0.4   # meters
+    semi_minor_axis: 0.2   # meters
+    mass: 1.0              # kg
+    color: [1.0, 0.3, 0.3] # RGB (red-ish)
+    
+  1:  # Medium ellipse
+    name: "medium_ellipse" 
+    type: "ellipse"
+    semi_major_axis: 0.7   # meters
+    semi_minor_axis: 0.4   # meters
+    mass: 1.8              # kg
+    color: [0.3, 1.0, 0.3] # RGB (green-ish)
+    
+  2:  # Large ellipse
+    name: "large_ellipse"
+    type: "ellipse"
+    semi_major_axis: 1.0   # meters
+    semi_minor_axis: 0.6   # meters
+    mass: 2.5              # kg
+    color: [0.3, 0.3, 1.0] # RGB (blue-ish)
+    
+  3:  # Elongated ellipse (high aspect ratio)
+    name: "elongated_ellipse"
+    type: "ellipse"
+    semi_major_axis: 1.2   # meters (장축)
+    semi_minor_axis: 0.4   # meters (단축)
+    mass: 2.3              # kg
+    color: [0.8, 0.3, 0.8] # RGB (purple-ish)
+
+# Simulation settings
+simulation:
+  workspace_bounds:
+    x_min: -1.0
+    x_max: 11.0
+    y_min: -1.0
+    y_max: 11.0
+    z_fixed: 0.0  # 2D simulation, z always 0
+    
+  orientation_bounds:
+    roll_fixed: 0.0   # 2D simulation, roll always 0
+    pitch_fixed: 0.0  # 2D simulation, pitch always 0  
+    yaw_min: -3.14159 # -π
+    yaw_max: 3.14159  # π
+    
+  collision_margin: 0.05  # meters, safety margin for collision detection
+
+# Data generation settings
+data_generation:
+  pose_format: "se3"  # SE(3) format: [x, y, z, roll, pitch, yaw]
+  coordinate_system: "world_frame"
+  default_fixed_values:
+    z: 0.0
+    roll: 0.0
+    pitch: 0.0 

@@ -1,0 +1,192 @@
+{
+  "env_type": "circles",
+  "difficulty": "hard",
+  "resolution": 0.05,
+  "noise_level": 0.01,
+  "workspace_bounds": [
+    -1,
+    11,
+    -1,
+    11
+  ],
+  "clustering_eps": 0.3,
+  "min_samples": 5,
+  "obstacle_type": "auto",
+  "num_points": 9525,
+  "num_obstacles": 16,
+  "seed": 7750,
+  "environment_details": {
+    "environment_type": "circle_only",
+    "config": {
+      "num_obstacles": 16,
+      "obstacle_size_range": [
+        0.2,
+        1.0
+      ],
+      "density_level": "dense",
+      "complexity_level": "complex",
+      "spatial_distribution": "edge",
+      "workspace_utilization": 0.8,
+      "min_distance_factor": 0.8
+    },
+    "num_obstacles": 16,
+    "obstacles": [
+      {
+        "id": 0,
+        "position": [
+          8.166367530822754,
+          5.347975730895996
+        ],
+        "radius": 1.2864941358566284,
+        "type": "circle"
+      },
+      {
+        "id": 1,
+        "position": [
+          8.53758716583252,
+          0.8820993900299072
+        ],
+        "radius": 0.6583489179611206,
+        "type": "circle"
+      },
+      {
+        "id": 2,
+        "position": [
+          2.705946207046509,
+          7.322887420654297
+        ],
+        "radius": 0.7652414441108704,
+        "type": "circle"
+      },
+      {
+        "id": 3,
+        "position": [
+          4.725945949554443,
+          7.1561737060546875
+        ],
+        "radius": 0.7252217531204224,
+        "type": "circle"
+      },
+      {
+        "id": 4,
+        "position": [
+          8.291242599487305,
+          7.450428009033203
+        ],
+        "radius": 0.7556753158569336,
+        "type": "circle"
+      },
+      {
+        "id": 5,
+        "position": [
+          8.656033515930176,
+          6.885335445404053
+        ],
+        "radius": 0.10995301604270935,
+        "type": "circle"
+      },
+      {
+        "id": 6,
+        "position": [
+          1.8375040292739868,
+          2.3814785480499268
+        ],
+        "radius": 0.4938092529773712,
+        "type": "circle"
+      },
+      {
+        "id": 7,
+        "position": [
+          2.308162212371826,
+          6.3410773277282715
+        ],
+        "radius": 0.9545785188674927,
+        "type": "circle"
+      },
+      {
+        "id": 8,
+        "position": [
+          2.843306303024292,
+          1.6868613958358765
+        ],
+        "radius": 0.33181145787239075,
+        "type": "circle"
+      },
+      {
+        "id": 9,
+        "position": [
+          3.299733877182007,
+          7.2480597496032715
+        ],
+        "radius": 1.5001208782196045,
+        "type": "circle"
+      },
+      {
+        "id": 10,
+        "position": [
+          7.561248779296875,
+          2.2772445678710938
+        ],
+        "radius": 0.27522704005241394,
+        "type": "circle"
+      },
+      {
+        "id": 11,
+        "position": [
+          9.079678535461426,
+          2.1784708499908447
+        ],
+        "radius": 0.4487675130367279,
+        "type": "circle"
+      },
+      {
+        "id": 12,
+        "position": [
+          7.857082366943359,
+          6.7856855392456055
+        ],
+        "radius": 0.7200794219970703,
+        "type": "circle"
+      },
+      {
+        "id": 13,
+        "position": [
+          2.0128273963928223,
+          1.0810458660125732
+        ],
+        "radius": 0.10669150203466415,
+        "type": "circle"
+      },
+      {
+        "id": 14,
+        "position": [
+          8.109292030334473,
+          6.16872501373291
+        ],
+        "radius": 1.0863478183746338,
+        "type": "circle"
+      },
+      {
+        "id": 15,
+        "position": [
+          8.112675666809082,
+          3.187471628189087
+        ],
+        "radius": 1.077049970626831,
+        "type": "circle"
+      }
+    ],
+    "workspace_bounds": [
+      0,
+      10,
+      0,
+      8
+    ],
+    "robot_base_position": [
+      0,
+      0
+    ],
+    "generation_timestamp": null
+  },
+  "generation_timestamp": "2025-07-14T16:45:15.175233"
+}

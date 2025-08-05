@@ -1,0 +1,48 @@
+{
+  "generation_info": {
+    "total_requested": 10000,
+    "successfully_generated": 10000,
+    "failed_count": 0,
+    "start_index": 0,
+    "generation_time_seconds": 2186.056233882904,
+    "generation_rate_per_second": 4.57444774064108
+  },
+  "configuration": {
+    "difficulties": [
+      "tutorial",
+      "easy",
+      "medium",
+      "hard",
+      "expert",
+      "random"
+    ],
+    "difficulty_weights": [
+      0.05,
+      0.2,
+      0.3,
+      0.25,
+      0.1,
+      0.1
+    ],
+    "resolution": 0.05,
+    "noise_level": 0.01,
+    "workspace_bounds": [
+      -1,
+      11,
+      -1,
+      11
+    ],
+    "clustering_eps": 0.3,
+    "min_samples": 5,
+    "obstacle_type": "auto"
+  },
+  "difficulty_distribution": {
+    "tutorial": 495,
+    "easy": 1997,
+    "medium": 2964,
+    "hard": 2525,
+    "expert": 1050,
+    "random": 969
+  },
+  "failed_environments": []
+}

@@ -1,0 +1,138 @@
+{
+  "env_type": "circles",
+  "difficulty": "medium",
+  "resolution": 0.05,
+  "noise_level": 0.01,
+  "workspace_bounds": [
+    -1,
+    11,
+    -1,
+    11
+  ],
+  "clustering_eps": 0.3,
+  "min_samples": 5,
+  "obstacle_type": "auto",
+  "num_points": 1644,
+  "num_obstacles": 10,
+  "seed": 114,
+  "environment_details": {
+    "environment_type": "circle_only",
+    "config": {
+      "num_obstacles": 10,
+      "obstacle_size_range": [
+        0.2,
+        0.6
+      ],
+      "density_level": "medium",
+      "complexity_level": "medium",
+      "spatial_distribution": "distributed",
+      "workspace_utilization": 0.6,
+      "min_distance_factor": 1.2
+    },
+    "num_obstacles": 10,
+    "obstacles": [
+      {
+        "id": 0,
+        "position": [
+          8.116606712341309,
+          6.784087657928467
+        ],
+        "radius": 0.8405185341835022,
+        "type": "circle"
+      },
+      {
+        "id": 1,
+        "position": [
+          3.8710083961486816,
+          1.2441540956497192
+        ],
+        "radius": 0.13883429765701294,
+        "type": "circle"
+      },
+      {
+        "id": 2,
+        "position": [
+          9.310328483581543,
+          6.760838985443115
+        ],
+        "radius": 0.29417452216148376,
+        "type": "circle"
+      },
+      {
+        "id": 3,
+        "position": [
+          4.930990219116211,
+          1.2733546495437622
+        ],
+        "radius": 0.20049695670604706,
+        "type": "circle"
+      },
+      {
+        "id": 4,
+        "position": [
+          7.388706207275391,
+          7.295261383056641
+        ],
+        "radius": 0.596484899520874,
+        "type": "circle"
+      },
+      {
+        "id": 5,
+        "position": [
+          3.5622141361236572,
+          3.087092399597168
+        ],
+        "radius": 0.2281467616558075,
+        "type": "circle"
+      },
+      {
+        "id": 6,
+        "position": [
+          8.386344909667969,
+          5.749266147613525
+        ],
+        "radius": 0.2044605016708374,
+        "type": "circle"
+      },
+      {
+        "id": 7,
+        "position": [
+          8.793211936950684,
+          4.853325366973877
+        ],
+        "radius": 0.2364882379770279,
+        "type": "circle"
+      },
+      {
+        "id": 8,
+        "position": [
+          2.9626879692077637,
+          7.155542850494385
+        ],
+        "radius": 0.19556984305381775,
+        "type": "circle"
+      },
+      {
+        "id": 9,
+        "position": [
+          3.843691825866699,
+          2.622800350189209
+        ],
+        "radius": 0.20292451977729797,
+        "type": "circle"
+      }
+    ],
+    "workspace_bounds": [
+      0,
+      10,
+      0,
+      8
+    ],
+    "robot_base_position": [
+      0,
+      0
+    ],
+    "generation_timestamp": null
+  },
+  "generation_timestamp": "2025-07-14T16:17:19.693759"
+}

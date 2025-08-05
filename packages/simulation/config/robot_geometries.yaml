@@ -1,0 +1,84 @@
+
+# SE(3) Rigid Body Configurations
+# Single rigid body robot configurations for 2D simulation
+
+rigid_bodies:
+  0:  # rb_0: Small ellipse
+    name: "small_ellipse"
+    type: "ellipse"
+    robot_type: "rigid_body"
+    semi_major_axis: 0.4   # meters
+    semi_minor_axis: 0.2   # meters
+    mass: 1.0              # kg
+    color: [1.0, 0.3, 0.3] # RGB (red-ish)
+    description: "Small ellipse rigid body (rb_0)"
+    
+  1:  # rb_1: Medium ellipse
+    name: "medium_ellipse" 
+    type: "ellipse"
+    robot_type: "rigid_body"
+    semi_major_axis: 0.7   # meters
+    semi_minor_axis: 0.4   # meters
+    mass: 1.8              # kg
+    color: [0.3, 1.0, 0.3] # RGB (green-ish)
+    description: "Medium ellipse rigid body (rb_1)"
+    
+  2:  # rb_2: Large ellipse
+    name: "large_ellipse"
+    type: "ellipse"
+    robot_type: "rigid_body"
+    semi_major_axis: 1.0   # meters
+    semi_minor_axis: 0.6   # meters
+    mass: 2.5              # kg
+    color: [0.3, 0.3, 1.0] # RGB (blue-ish)
+    description: "Large ellipse rigid body (rb_2)"
+    
+  3:  # rb_3: Elongated ellipse (high aspect ratio)
+    name: "elongated_ellipse"
+    type: "ellipse"
+    robot_type: "rigid_body"
+    semi_major_axis: 1.2   # meters (장축)
+    semi_minor_axis: 0.4   # meters (단축)
+    mass: 2.3              # kg
+    color: [0.8, 0.3, 0.8] # RGB (purple-ish)
+    description: "Elongated ellipse rigid body (rb_3) - highest aspect ratio"
+
+# SE(3) Simulation settings
+se3_simulation:
+  workspace_bounds:
+    x_min: -1.0
+    x_max: 11.0
+    y_min: -1.0
+    y_max: 11.0
+    z_fixed: 0.0  # 2D simulation, z always 0
+    
+  orientation_bounds:
+    roll_fixed: 0.0   # 2D simulation, roll always 0
+    pitch_fixed: 0.0  # 2D simulation, pitch always 0  
+    yaw_min: -3.14159 # -π
+    yaw_max: 3.14159  # π
+    
+  collision_margin: 0.05  # meters, safety margin for collision detection
+  
+  control:
+    position_gain: 10.0      # Position control gain
+    orientation_gain: 5.0    # Orientation control gain
+    max_linear_velocity: 5.0 # m/s
+    max_angular_velocity: 2.0 # rad/s
+    
+  rendering:
+    target_color: [1.0, 0.0, 0.0]  # Red target outline
+    target_alpha: 0.7              # Target transparency
+    robot_alpha: 1.0               # Robot solid
+
+# Data generation settings
+data_generation:
+  pose_format: "se3"  # SE(3) format: [x, y, z, roll, pitch, yaw]
+  coordinate_system: "world_frame"
+  default_fixed_values:
+    z: 0.0
+    roll: 0.0
+    pitch: 0.0
+
+# Default settings
+default_geometry: 0  # Default to small_ellipse

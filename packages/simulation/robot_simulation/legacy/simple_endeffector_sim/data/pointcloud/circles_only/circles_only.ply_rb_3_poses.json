@@ -1,0 +1,312 @@
+{
+  "environment": {
+    "name": "../../simulation/robot_simulation/legacy/simple_endeffector_sim/data/pointcloud/circles_only/circles_only.ply",
+    "ply_file": "../../simulation/robot_simulation/legacy/simple_endeffector_sim/data/pointcloud/circles_only/circles_only.ply",
+    "metadata": {
+      "name": "../../simulation/robot_simulation/legacy/simple_endeffector_sim/data/pointcloud/circles_only/circles_only.ply",
+      "ply_file": "../../simulation/robot_simulation/legacy/simple_endeffector_sim/data/pointcloud/circles_only/circles_only.ply",
+      "env_type": "random",
+      "link_shape": "rectangle",
+      "resolution": 0.05,
+      "noise_level": 0.01,
+      "workspace_bounds": [
+        -1,
+        11,
+        -1,
+        11
+      ],
+      "clustering_eps": 0.3,
+      "min_samples": 5,
+      "obstacle_type": "auto",
+      "num_points": 376,
+      "num_obstacles": 6,
+      "generation_timestamp": "2025-07-09T12:00:28.509703",
+      "difficulty": "medium",
+      "obstacle_types_used": [
+        "circle"
+      ],
+      "seed": 111,
+      "environment_details": {
+        "environment_type": "random",
+        "difficulty": "medium",
+        "num_obstacles": 6,
+        "obstacles": [
+          {
+            "id": 0,
+            "position": [
+              5.198317527770996,
+              3.2831101417541504
+            ],
+            "angle": 0.0,
+            "type": "circle",
+            "radius": 0.5702987909317017
+          },
+          {
+            "id": 1,
+            "position": [
+              6.352717399597168,
+              5.3853864669799805
+            ],
+            "angle": 0.0,
+            "type": "circle",
+            "radius": 0.5354512333869934
+          },
+          {
+            "id": 2,
+            "position": [
+              6.698653221130371,
+              3.413620710372925
+            ],
+            "angle": 0.0,
+            "type": "circle",
+            "radius": 0.43012097477912903
+          },
+          {
+            "id": 3,
+            "position": [
+              4.214205741882324,
+              6.14407205581665
+            ],
+            "angle": 0.0,
+            "type": "circle",
+            "radius": 0.6347897052764893
+          },
+          {
+            "id": 4,
+            "position": [
+              5.249391555786133,
+              0.731849730014801
+            ],
+            "angle": 0.0,
+            "type": "circle",
+            "radius": 0.6066676378250122
+          },
+          {
+            "id": 5,
+            "position": [
+              8.561638832092285,
+              3.661465883255005
+            ],
+            "angle": 0.0,
+            "type": "circle",
+            "radius": 0.238431915640831
+          }
+        ],
+        "workspace_bounds": [
+          0,
+          10,
+          0,
+          8
+        ],
+        "robot_base_position": [
+          0,
+          0
+        ],
+        "generation_timestamp": null
+      }
+    }
+  },
+  "rigid_body": {
+    "id": 3,
+    "metadata": {
+      "id": 3,
+      "name": "elongated_ellipse",
+      "type": "ellipse",
+      "semi_major_axis": 1.2,
+      "semi_minor_axis": 0.4,
+      "mass": 2.3,
+      "color": [
+        0.8,
+        0.3,
+        0.8
+      ]
+    }
+  },
+  "poses": {
+    "data": [
+      [
+        -0.5373779279514395,
+        7.354691871644633,
+        0.0,
+        0.0,
+        0.0,
+        -2.2372316619930954
+      ],
+      [
+        4.438270741594549,
+        4.979266757576614,
+        0.0,
+        0.0,
+        0.0,
+        -3.0212224420035785
+      ],
+      [
+        5.5638068514920676,
+        8.063802059059592,
+        0.0,
+        0.0,
+        0.0,
+        -0.4142617513264195
+      ],
+      [
+        1.1142572514162747,
+        9.210503021535667,
+        0.0,
+        0.0,
+        0.0,
+        2.011999818350384
+      ],
+      [
+        3.5102994281173867,
+        0.14891736155291735,
+        0.0,
+        0.0,
+        0.0,
+        0.07810210307186916
+      ],
+      [
+        4.951726865354562,
+        8.26761189581619,
+        0.0,
+        0.0,
+        0.0,
+        0.610831400507315
+      ],
+      [
+        -0.4129631001411802,
+        -0.26547185898250003,
+        0.0,
+        0.0,
+        0.0,
+        2.7765599491943647
+      ],
+      [
+        9.069178417240927,
+        2.5539174027990734,
+        0.0,
+        0.0,
+        0.0,
+        2.442600517910325
+      ],
+      [
+        6.01252475267537,
+        10.193447111524767,
+        0.0,
+        0.0,
+        0.0,
+        1.1262705628429392
+      ],
+      [
+        0.1291845004077512,
+        6.4729719570953606,
+        0.0,
+        0.0,
+        0.0,
+        1.8025571982178459
+      ],
+      [
+        9.786958967750893,
+        2.97529986472568,
+        0.0,
+        0.0,
+        0.0,
+        0.18152998824360855
+      ],
+      [
+        7.413861731182568,
+        1.001819770902817,
+        0.0,
+        0.0,
+        0.0,
+        2.188806775655048
+      ],
+      [
+        8.370383321005887,
+        -0.3988330176723238,
+        0.0,
+        0.0,
+        0.0,
+        0.5743350327991728
+      ],
+      [
+        3.416625475432422,
+        1.2320958678616738,
+        0.0,
+        0.0,
+        0.0,
+        0.6564689331806353
+      ],
+      [
+        10.630093335510573,
+        5.623637884496706,
+        0.0,
+        0.0,
+        0.0,
+        -2.4296939692121526
+      ],
+      [
+        4.9391373603969635,
+        8.349588816932652,
+        0.0,
+        0.0,
+        0.0,
+        2.8602847305850796
+      ],
+      [
+        7.582137355267411,
+        -0.5038838261607741,
+        0.0,
+        0.0,
+        0.0,
+        2.9314486857426454
+      ],
+      [
+        6.2223355567743015,
+        0.003777237962586444,
+        0.0,
+        0.0,
+        0.0,
+        -2.3426413657548193
+      ],
+      [
+        0.03473355235280273,
+        6.977642839948974,
+        0.0,
+        0.0,
+        0.0,
+        -2.1733235608485773
+      ],
+      [
+        8.689629492836275,
+        0.3072892448366926,
+        0.0,
+        0.0,
+        0.0,
+        0.22109750061008482
+      ]
+    ],
+    "count": 20,
+    "format": "se3_poses",
+    "coordinate_system": "world_frame",
+    "fixed_dof": {
+      "z": 0.0,
+      "roll": 0.0,
+      "pitch": 0.0
+    }
+  },
+  "generation_info": {
+    "target_poses": 20,
+    "achieved_poses": 20,
+    "generation_time": 0.0033998489379882812,
+    "safety_margin": 0.05,
+    "max_attempts": 500,
+    "timestamp": "2025-07-21 23:19:14"
+  },
+  "statistics": {
+    "total_generated": 20,
+    "target_poses": 20,
+    "success_rate": 100.0,
+    "generation_time": 0.0033998489379882812,
+    "poses_per_second": 5882.6143057503505
+  }
+}

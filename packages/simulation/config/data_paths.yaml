@@ -1,0 +1,23 @@
+# Data paths configuration for robot simulation
+# All paths are relative to the project root
+
+data_sources:
+  # Data generator package outputs
+  data_generator_base: "../data_generator"
+  environments: "data/pointcloud/"
+  poses: "data/pose/"
+  trajectories: "data/trajectories/"
+  init_target: "data/init_target/"
+
+models:
+  # RFM policy package outputs  
+  rfm_policy_base: "../rfm_policy"
+  pretrained: "models/pretrained/"
+  checkpoints: "experiments/checkpoints/"
+  
+# File naming patterns
+patterns:
+  environment_meta: "*_meta.json"
+  environment_ply: "*.ply"
+  pose_files: "*_poses.json"
+  trajectory_files: "*_trajectory.json" 

@@ -1,0 +1,120 @@
+
+# 로봇 geometry set
+robot_geometries:
+  0:
+    name: "Standard Rectangle Robot"
+    link_shape: "rectangle"
+    link_lengths: [3.0, 2.5, 2.0]
+    link_widths: [0.3, 0.25, 0.2]
+    description: "표준 직사각형 링크 로봇"
+    max_reach: 7.5
+
+  1:
+    name: "Compact Rectangle Robot"
+    link_shape: "rectangle"
+    link_lengths: [2.5, 2.0, 1.5]
+    link_widths: [0.25, 0.2, 0.15]
+    description: "소형 직사각형 링크 로봇"
+    max_reach: 6.0
+
+  2:
+    name: "Extended Rectangle Robot"
+    link_shape: "rectangle"
+    link_lengths: [3.5, 3.0, 2.5]
+    link_widths: [0.35, 0.3, 0.25]
+    description: "확장형 직사각형 링크 로봇"
+    max_reach: 9.0
+
+  3:
+    name: "Standard Ellipse Robot"
+    link_shape: "ellipse"
+    link_lengths: [3.0, 2.5, 2.0]
+    link_widths: [0.3, 0.25, 0.2]
+    description: "표준 타원형 링크 로봇"
+    max_reach: 7.5
+
+  4:
+    name: "Slender Ellipse Robot"
+    link_shape: "ellipse"
+    link_lengths: [3.2, 2.8, 2.3]
+    link_widths: [0.2, 0.18, 0.15]
+    description: "슬렌더 타원형 링크 로봇"
+    max_reach: 8.3
+
+  5:
+    name: "Heavy Duty Robot"
+    link_shape: "rectangle"
+    link_lengths: [4.0, 3.5, 3.0]
+    link_widths: [0.5, 0.45, 0.4]
+    description: "헤비듀티 산업용 로봇"
+    max_reach: 10.5
+
+# 기본 설정
+default_geometry: 0
+
+# 시뮬레이션 파라미터
+simulation:
+  fps: 60
+  screen_width: 800
+  screen_height: 600
+  time_step: 0.0167  # 1.0 / fps
+  physics:
+    gravity: [0, 0]
+    do_sleep: true
+  rendering:
+    ppm: 50.0  # pixels per meter
+    origin: [100, 500]  # screen origin offset
+
+# Pointcloud 기본 설정
+pointcloud:
+  default_resolution: 0.03  # 더 정밀한 해상도 (0.05 → 0.03)
+  default_noise_level: 0.005  # 더 낮은 노이즈 (0.01 → 0.005)
+  default_clustering_eps: 0.15  # 더 정밀한 클러스터링 (0.3 → 0.15)
+  default_min_samples: 3  # 더 작은 클러스터도 감지 (5 → 3)
+  workspace_bounds: [-1, 11, -1, 11]  # [min_x, max_x, min_y, max_y]
+  data_dir: "data/pointcloud"
+
+# 제어 정책 파라미터
+policies:
+  potential_field:
+    attractive_gain: 1.0
+    repulsive_gain: 2.0
+    repulsive_range: 1.0
+    max_force: 10.0
+    
+  potential_field_pd:
+    attractive_gain: 1.5
+    repulsive_gain: 3.0
+    repulsive_range: 1.2
+    pd_gain_p: 2.0
+    pd_gain_d: 0.5
+    max_force: 15.0
+    
+  rmp:
+    task_gain: 5.0
+    obstacle_gain: 10.0
+    damping: 2.0
+    inertia: 1.0
+    max_force: 20.0
+
+# 환경 설정
+environment:
+  static_obstacles:
+    - position: [4, 3]
+      size: [0.6, 0.6]
+    - position: [6, 1] 
+      size: [0.6, 0.6]
+    - position: [8, 3]
+      size: [0.6, 0.6]
+
+# 비디오 녹화 설정
+video:
+  default_fps: 60
+  default_duration: 10.0
+  output_dir: "data/results/simulation_videos"
+  default_filename: "robot_simulation.mp4"
+
+# 로그 설정
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

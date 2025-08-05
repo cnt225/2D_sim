@@ -1,0 +1,102 @@
+{
+  "env_type": "circles",
+  "difficulty": "medium",
+  "resolution": 0.05,
+  "noise_level": 0.01,
+  "workspace_bounds": [
+    -1,
+    11,
+    -1,
+    11
+  ],
+  "clustering_eps": 0.3,
+  "min_samples": 5,
+  "obstacle_type": "auto",
+  "num_points": 2381,
+  "num_obstacles": 6,
+  "seed": 1574,
+  "environment_details": {
+    "environment_type": "circle_only",
+    "config": {
+      "num_obstacles": 6,
+      "obstacle_size_range": [
+        0.3,
+        0.7
+      ],
+      "density_level": "medium",
+      "complexity_level": "medium",
+      "spatial_distribution": "clusters",
+      "workspace_utilization": 0.6,
+      "min_distance_factor": 1.2
+    },
+    "num_obstacles": 6,
+    "obstacles": [
+      {
+        "id": 0,
+        "position": [
+          3.462946653366089,
+          1.8306889533996582
+        ],
+        "radius": 0.7146158814430237,
+        "type": "circle"
+      },
+      {
+        "id": 1,
+        "position": [
+          2.5622317790985107,
+          2.3380539417266846
+        ],
+        "radius": 0.8430666923522949,
+        "type": "circle"
+      },
+      {
+        "id": 2,
+        "position": [
+          7.094607353210449,
+          3.547621011734009
+        ],
+        "radius": 0.5216765999794006,
+        "type": "circle"
+      },
+      {
+        "id": 3,
+        "position": [
+          8.13893985748291,
+          4.216253280639648
+        ],
+        "radius": 0.5210352540016174,
+        "type": "circle"
+      },
+      {
+        "id": 4,
+        "position": [
+          5.096025466918945,
+          3.7414472103118896
+        ],
+        "radius": 0.4555179178714752,
+        "type": "circle"
+      },
+      {
+        "id": 5,
+        "position": [
+          6.0424933433532715,
+          3.5512313842773438
+        ],
+        "radius": 0.2431868016719818,
+        "type": "circle"
+      }
+    ],
+    "workspace_bounds": [
+      0,
+      10,
+      0,
+      8
+    ],
+    "robot_base_position": [
+      0,
+      0
+    ],
+    "generation_timestamp": null
+  },
+  "generation_timestamp": "2025-07-14T16:22:35.990028"
+}

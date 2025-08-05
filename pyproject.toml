@@ -1,0 +1,38 @@
+[project]
+name = "robot-2d-simulation-suite"
+version = "0.2.0"
+description = "SE(3) Rigid Body simulation with Riemannian Flow Matching policy learning for obstacle avoidance"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "ompl>=1.7.0",
+    "robot-data-generator",
+    "robot-rfm-policy",
+    "robot-simulation",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ipykernel>=6.29.5",
+    "ipython>=8.12.3",
+    "jupyter-client>=8.6.3",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+robot-data-generator = { workspace = true }
+robot-rfm-policy = { workspace = true }
+robot-simulation = { workspace = true }
+
+[tool.uv]
+dev-dependencies = [
+    "ipykernel>=6.29.5",
+    "ipython>=8.12.3",
+    "jupyter-client>=8.6.3",
+]

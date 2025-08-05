@@ -1,0 +1,192 @@
+{
+  "env_type": "circles",
+  "difficulty": "expert",
+  "resolution": 0.05,
+  "noise_level": 0.01,
+  "workspace_bounds": [
+    -1,
+    11,
+    -1,
+    11
+  ],
+  "clustering_eps": 0.3,
+  "min_samples": 5,
+  "obstacle_type": "auto",
+  "num_points": 11354,
+  "num_obstacles": 16,
+  "seed": 3175,
+  "environment_details": {
+    "environment_type": "circle_only",
+    "config": {
+      "num_obstacles": 16,
+      "obstacle_size_range": [
+        0.1,
+        1.2
+      ],
+      "density_level": "dense",
+      "complexity_level": "complex",
+      "spatial_distribution": "clusters",
+      "workspace_utilization": 0.9,
+      "min_distance_factor": 0.5
+    },
+    "num_obstacles": 16,
+    "obstacles": [
+      {
+        "id": 0,
+        "position": [
+          9.136388778686523,
+          2.044593095779419
+        ],
+        "radius": 0.9182192087173462,
+        "type": "circle"
+      },
+      {
+        "id": 1,
+        "position": [
+          8.517751693725586,
+          1.7181364297866821
+        ],
+        "radius": 0.09335067868232727,
+        "type": "circle"
+      },
+      {
+        "id": 2,
+        "position": [
+          8.051820755004883,
+          1.5920461416244507
+        ],
+        "radius": 0.8794361352920532,
+        "type": "circle"
+      },
+      {
+        "id": 3,
+        "position": [
+          7.496210098266602,
+          1.9843748807907104
+        ],
+        "radius": 1.4148608446121216,
+        "type": "circle"
+      },
+      {
+        "id": 4,
+        "position": [
+          8.53068733215332,
+          0.7219936847686768
+        ],
+        "radius": 0.2109007090330124,
+        "type": "circle"
+      },
+      {
+        "id": 5,
+        "position": [
+          7.831354141235352,
+          2.4489223957061768
+        ],
+        "radius": 0.329944372177124,
+        "type": "circle"
+      },
+      {
+        "id": 6,
+        "position": [
+          3.830920934677124,
+          3.7032337188720703
+        ],
+        "radius": 0.7220146656036377,
+        "type": "circle"
+      },
+      {
+        "id": 7,
+        "position": [
+          3.5384762287139893,
+          4.857431888580322
+        ],
+        "radius": 1.5468931198120117,
+        "type": "circle"
+      },
+      {
+        "id": 8,
+        "position": [
+          3.99306583404541,
+          4.414519309997559
+        ],
+        "radius": 0.3007182776927948,
+        "type": "circle"
+      },
+      {
+        "id": 9,
+        "position": [
+          3.267601490020752,
+          4.602621555328369
+        ],
+        "radius": 0.7365591526031494,
+        "type": "circle"
+      },
+      {
+        "id": 10,
+        "position": [
+          3.709235191345215,
+          5.169730186462402
+        ],
+        "radius": 0.13956677913665771,
+        "type": "circle"
+      },
+      {
+        "id": 11,
+        "position": [
+          6.933800220489502,
+          4.994322299957275
+        ],
+        "radius": 0.9412021040916443,
+        "type": "circle"
+      },
+      {
+        "id": 12,
+        "position": [
+          6.251622200012207,
+          4.769377708435059
+        ],
+        "radius": 1.4095211029052734,
+        "type": "circle"
+      },
+      {
+        "id": 13,
+        "position": [
+          7.3060302734375,
+          4.5859222412109375
+        ],
+        "radius": 1.759795069694519,
+        "type": "circle"
+      },
+      {
+        "id": 14,
+        "position": [
+          6.662693977355957,
+          5.686400413513184
+        ],
+        "radius": 1.0939691066741943,
+        "type": "circle"
+      },
+      {
+        "id": 15,
+        "position": [
+          7.510233402252197,
+          4.05869722366333
+        ],
+        "radius": 1.7250604629516602,
+        "type": "circle"
+      }
+    ],
+    "workspace_bounds": [
+      0,
+      10,
+      0,
+      8
+    ],
+    "robot_base_position": [
+      0,
+      0
+    ],
+    "generation_timestamp": null
+  },
+  "generation_timestamp": "2025-07-14T16:28:35.405294"
+}

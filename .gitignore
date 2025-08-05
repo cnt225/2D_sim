@@ -1,0 +1,76 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv/
+.env
+
+# Data files (exclude from git)
+data/pointcloud/
+data/pose/
+data/pose_pairs/
+data/trajectories/
+data/result/
+data/visualizations/
+
+# Model checkpoints and training outputs
+*.pth
+*.ckpt
+checkpoints/
+runs/
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+*_temp/
+*_temp_*
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/
+
+# Wandb logs
+wandb/
+
+# Large media files
+*.mp4
+*.avi
+*.mov
+*.gif
+*.png
+*.jpg
+*.jpeg
+*.ply
+*.pcd
+
+# Compiled extensions
+*.so
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Documentation builds
+docs/_build/
