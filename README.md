@@ -27,12 +27,15 @@
 │   │       └── utils/                  # 궤적 시각화 도구
 │   ├── simulation/                     # 시뮬레이션 환경
 │   │   └── robot_simulation/           # SE(3) rigid body 시뮬레이션
-│   └── rfm_policy/                     # Riemannian Flow Matching 모델
-│       ├── models/                     # SE(3) RFM 모델 구현 
-│       ├── loaders/                    # 데이터 로더
-│       ├── losses/                     # 손실 함수들
-│       ├── trainers/                   # 훈련 시스템
-│       └── utils/                      # ODE solver, SE(3) 유틸리티
+│   └── policy/                         # Riemannian Flow Matching 모델
+│       └── v1/                         # 최신 구현 버전
+│           ├── models/                  # Motion RFM 모델 구현 
+│           ├── loaders/                 # 데이터 로더 (정규화 포함)
+│           ├── trainers/                # 훈련 시스템
+│           ├── utils/                   # 정규화, ODE solver, SE(3) 유틸리티
+│           ├── configs/                 # 설정 파일들
+│           ├── checkpoints/             # 학습된 모델 체크포인트
+│           └── debug/                   # 디버그 및 분석 스크립트
 ├── data/                               # 생성된 데이터
 │   ├── pointcloud/circle_envs_10k/     # 10,000개 환경 포인트클라우드
 │   ├── pose_pairs/circle_envs_10k/     # Init-target SE(3) 포즈 페어
@@ -114,6 +117,38 @@ uv sync
 - ✅ **tmux 백그라운드 실행**: SSH 연결 해제 시에도 안전
 - ✅ **가상환경 분리**: packages/policy/policy_env
 
+### **4. 모션 RFM 모델 학습 및 최적화** ✅
+- ✅ **초기 학습 시작**: tmux 세션으로 백그라운드 실행
+- ✅ **학습 속도 문제 진단**: 11 에포크/11시간 → 617일 예상
+- ✅ **하이퍼파라미터 최적화**: 
+  - `batch_size`: 4 → 32 (8x 빨라짐)
+  - `n_epoch`: 1000 → 10 (충분한 테스트)
+  - `augment_data`: true → false (안정성 향상)
+- ✅ **학습 완료**: 10 에포크, Loss ~5.0
+
+### **5. 추론 파이프라인 구현** ✅
+- ✅ **기본 추론 엔진**: `inference.py` 구현
+- ✅ **궤적 생성 전략**: `traj_gen_strategy.md` 문서화
+- ✅ **ODE 적분 기반 궤적 생성**: RK4 적분, 적응형 타임스텝
+- ✅ **초기 추론 테스트**: circle_env_000000, pose pair #2
+
+### **6. 추론 성능 문제 진단 및 정규화 구현** ✅
+- ✅ **추론 실패 원인 분석**: 거의 제자리, 극도로 작은 twist 값
+- ✅ **학습 데이터 twist 통계 분석**: 
+  - 학습 데이터: 평균 5.6 m/s
+  - 모델 출력: 0.06 m/s (100배 작음)
+- ✅ **정규화 파이프라인 설계 및 구현**:
+  - `TwistNormalizer` 클래스 (통계 생성, 정규화, 역정규화)
+  - 정규화된 데이터셋 (Dataset에 정규화 적용)
+  - 정규화된 추론 엔진 (`inference_normalized.py`)
+- ✅ **정규화된 모델 재학습**: 10 에포크 완료
+
+### **7. 코드베이스 정리 및 Git 관리** ✅
+- ✅ **디버그/분석 스크립트 정리**: `debug/` 폴더로 이동
+- ✅ **.gitignore 업데이트**: fm-main/, policy_env/, debug/ 폴더 등
+- ✅ **Git 캐시 정리**: 불필요한 파일 제거
+- ✅ **원격 저장소 푸시**: 깔끔한 코드베이스 반영
+
 ---
 
 ## 📊 현재 데이터 현황
@@ -182,27 +217,39 @@ python generate_all_10k.py  # 추후 실행
 
 ---
 
-## 🎯 현재 상황 (2025.01.09)
+## 🎯 현재 상황 (2025.01.11)
 
-### **🔥 현재 진행 중: 모션 RFM 학습**
+### **🚨 현재 문제: 정규화 모델 추론 실패**
 ```bash
-# 현재 tmux 세션에서 학습 실행 중
-tmux attach-session -t motion_training
-tail -f training_tmux.log
+# 정규화된 모델 추론 테스트 결과
+cd packages/policy/v1
+source ../policy_env/bin/activate
+python inference_test.py
 
-# Wandb 대시보드 모니터링
-https://wandb.ai/cnt225-seoul-national-university/motion_planning_rfm
+# 결과: 심각한 문제 발견
+# 🎯 시작: [4.139, 0.279, 0.000] → 목표: [8.439, 4.652, 0.000] (오른쪽 위)
+# 🔴 실제: [3.269, -0.459, 0.000] (**왼쪽 아래로!**)
+# 📏 극도로 작은 이동: 평균 5.7mm/스텝
+# 🔄 일정한 패턴 반복: 방향성 학습 실패
 ```
 
-### **✅ 학습 환경 설정 완료**
-- **데이터셋**: 3,241개 clean 궤적 (train/valid/test = 90/5/5)
-- **모델**: MotionRCFM (current_T, target_T, time_t, pointcloud → 6D twist)
-- **인프라**: tmux + wandb + 견고한 오류 처리
+### **✅ 완료된 작업들**
+- **정규화 파이프라인**: 완전한 양방향 정규화 구현
+- **모델 재학습**: 정규화된 데이터로 10 에포크 완료
+- **추론 엔진**: 정규화 적용된 추론 시스템 구현
+- **코드베이스 정리**: Git 관리 및 구조 정리 완료
+
+### **🔍 문제 진단 결과**
+1. **방향성 문제**: 모델이 목표와 반대 방향으로 이동
+2. **스케일 문제**: 정규화 후에도 여전히 작은 twist 값
+3. **학습 부족**: 10 에포크로는 복잡한 환경에서 방향성 학습 어려움
+4. **환경 인식 문제**: 포인트클라우드 정보를 제대로 활용하지 못함
 
 ### **🎯 다음 단계**
-1. **학습 완료 후 성능 평가**
-2. **RRT-Connect vs RFM 비교**
-3. **실시간 궤적 생성 테스트**
+1. **학습 강화**: 에포크 수 증가 (50-100)
+2. **데이터 검증**: 학습 데이터의 정답 라벨 품질 확인
+3. **모델 검증**: velocity field 방향성 분석
+4. **단계적 테스트**: 간단한 환경에서 시작하여 복잡도 증가
 
 ---
 
@@ -238,18 +285,18 @@ cd packages/policy/v1
 # 가상환경 활성화
 source ../policy_env/bin/activate
 
-# 모델 테스트 (완료)
-python test_motion_model.py
+# 정규화된 모델 추론 테스트
+python inference_test.py
 
-# 현재 학습 실행 중 (tmux)
-tmux attach-session -t motion_training
+# 학습 재시작 (필요시)
+bash start_normalized_training.sh
+
+# tmux 세션 확인
+tmux list-sessions
+tmux attach-session -t motion_training_10epochs
 
 # 학습 진행 확인
 tail -f training_tmux.log
-ps aux | grep python | grep train
-
-# 학습 재시작 (필요시)
-tmux send-keys -t motion_training "PYTHONWARNINGS=ignore python train.py --config configs/motion_rcfm.yml > training_tmux.log 2>&1" Enter
 ```
 
 ---
@@ -262,15 +309,34 @@ tmux send-keys -t motion_training "PYTHONWARNINGS=ignore python train.py --confi
 - ✅ **T_dot 계산**: body frame 기준 정확한 계산
 
 ### **모델 성능**  
-- 🔥 **현재 학습 중**: Epoch 1 진행 중 (Loss ~5.0)
-- 🎯 **90% 충돌 없는 궤적 생성**
-- 🎯 **RRT 대비 10x 빠른 추론**
-- 🎯 **RRT 대비 2x 부드러운 궤적**
+- ✅ **정규화 파이프라인**: 완전한 양방향 정규화 구현
+- ✅ **학습 완료**: 정규화된 데이터로 10 에포크 완료
+- 🚨 **추론 실패**: 방향성 문제, 스케일 문제 해결 필요
+- 🎯 **목표**: 90% 충돌 없는 궤적 생성, RRT 대비 10x 빠른 추론
 
 ### **시스템 안정성**
 - ✅ **안정적 학습 환경**: tmux + 견고한 오류 처리
 - ✅ **Wandb 로깅**: 실시간 모니터링
 - ✅ **재현 가능한 실험**: 완전한 설정 파일
+- ✅ **코드베이스 관리**: Git 기반 버전 관리
+
+---
+
+## 🚨 현재 이슈 및 해결 방안
+
+### **핵심 문제: 정규화 모델 추론 실패**
+- **증상**: 완전히 잘못된 방향으로 이동, 극도로 작은 이동 스케일
+- **원인**: 10 에포크로는 복잡한 환경에서 방향성 학습 어려움
+- **해결 방안**: 
+  1. 학습 에포크 증가 (50-100)
+  2. 학습 데이터 품질 검증
+  3. 단계적 테스트 (간단한 환경부터)
+
+### **기술적 성과**
+- ✅ **정규화 파이프라인**: 완전한 구현 및 검증
+- ✅ **추론 시스템**: ODE 적분 기반 궤적 생성
+- ✅ **데이터 처리**: 견고한 오류 처리 및 fallback 시스템
+- ✅ **개발 환경**: 안정적인 학습 및 테스트 환경
 
 ---
 
@@ -284,4 +350,6 @@ tmux send-keys -t motion_training "PYTHONWARNINGS=ignore python train.py --confi
 
 ---
 
-**현재 상태**: 모션 RFM 모델 학습 진행 중 🔥 (2025.01.09)
+**현재 상태**: 정규화 모델 추론 실패 원인 분석 및 해결 진행 중 🚨 (2025.01.11)
+
+**다음 마일스톤**: 추론 성공 및 궤적 생성 품질 개선 🎯

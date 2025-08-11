@@ -51,7 +51,7 @@ class NormalizedMotionRFMInference:
         if Path(model_path).exists():
             # PyTorch 2.6 호환성을 위해 weights_only=False 사용
             checkpoint = torch.load(model_path, map_location=self.device, weights_only=False)
-            model.load_state_dict(checkpoint['model_state_dict'])
+            model.load_state_dict(checkpoint['model_state'])
             print(f"✅ Model loaded from {model_path}")
         else:
             print(f"⚠️ Checkpoint not found: {model_path}, using random weights")
