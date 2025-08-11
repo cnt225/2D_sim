@@ -1,3 +1,10 @@
+# Exclude everything except packages and src
+/*
+!/packages/
+!/src/
+!/.gitignore
+!/README.md
+
 # Python-generated files
 __pycache__/
 *.py[oc]
@@ -9,6 +16,7 @@ wheels/
 # Virtual environments
 .venv/
 .env
+**/policy_env/
 
 # Data files (exclude from git)
 data/pointcloud/
@@ -20,6 +28,10 @@ data/visualizations/
 
 # Legacy data files
 packages/simulation/robot_simulation/legacy/simple_endeffector_sim/data/
+
+# Specific packages subdirectories to ignore
+packages/data_generator/debug/result/v1/
+packages/policy/rfm_policy/
 
 # Model checkpoints and training outputs
 *.pth

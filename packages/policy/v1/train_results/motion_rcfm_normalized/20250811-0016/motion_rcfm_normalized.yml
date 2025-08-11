@@ -1,0 +1,101 @@
+data:
+  test:
+    augment_data: false
+    batch_size: 32
+    dataset: trajectory
+    max_trajectories: 324
+    normalization_stats_path: configs/normalization_stats.json
+    normalize_twist: true
+    num_points: 2000
+    num_workers: 0
+    pointcloud_root: /home/dhkang225/2D_sim/data/pointcloud/circle_envs_10k/circle_envs_10k
+    trajectory_root: /home/dhkang225/2D_sim/data/trajectories/circle_envs_10k_bsplined
+    use_bsplined: true
+  train:
+    augment_data: false
+    batch_size: 32
+    dataset: trajectory
+    max_trajectories: 3241
+    normalization_stats_path: configs/normalization_stats.json
+    normalize_twist: true
+    num_points: 2000
+    num_workers: 0
+    pointcloud_root: /home/dhkang225/2D_sim/data/pointcloud/circle_envs_10k/circle_envs_10k
+    trajectory_root: /home/dhkang225/2D_sim/data/trajectories/circle_envs_10k_bsplined
+    use_bsplined: true
+  valid:
+    augment_data: false
+    batch_size: 32
+    dataset: trajectory
+    max_trajectories: 324
+    normalization_stats_path: configs/normalization_stats.json
+    normalize_twist: true
+    num_points: 2000
+    num_workers: 0
+    pointcloud_root: /home/dhkang225/2D_sim/data/pointcloud/circle_envs_10k/circle_envs_10k
+    trajectory_root: /home/dhkang225/2D_sim/data/trajectories/circle_envs_10k_bsplined
+    use_bsplined: true
+device: cuda
+logdir: train_results_normalized
+logger:
+  endwith:
+  - '@'
+  - '#'
+  - $
+  - '%'
+model:
+  arch: motion_rcfm
+  init_dist:
+    arch: uniform
+  latent_feature:
+    arch: dgcnn
+    dropout: 0.5
+    emb_dims: 1024
+    k: 20
+  ode_solver:
+    arch: RK4
+    n_steps: 20
+  prob_path: OT
+  velocity_field:
+    activation:
+    - relu
+    - relu
+    - relu
+    - relu
+    - relu
+    arch: vf_fc_vec_motion
+    in_dim: 25
+    l_hidden:
+    - 2048
+    - 1024
+    - 512
+    - 512
+    - 512
+    lat_dim: 2048
+    out_activation: linear
+    out_dim: 6
+normalization:
+  enabled: true
+  method: standardization
+  stats_path: configs/normalization_stats.json
+test:
+  num_simulation_trajectories: 50
+trainer: motion
+training:
+  eval_interval: 500
+  losses:
+    mse_loss:
+      arch: mse
+      weight: 1.0
+  n_epoch: 10
+  optimizer:
+    lr: 0.0005
+    name: adam
+    weight_decay: 0.01
+  print_interval: 50
+  save_interval: 10
+  val_interval: 200
+  vis_interval: 500
+wandb:
+  entity: cnt225-seoul-national-university
+  project_name: motion_planning_rfm_normalized

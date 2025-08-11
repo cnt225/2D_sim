@@ -1,0 +1,83 @@
+wandb:
+  entity: cnt225-seoul-national-university
+  project_name: motion_planning_rfm
+  
+data:
+  train:
+    dataset: "trajectory"
+    trajectory_root: "/home/dhkang225/2D_sim/data/trajectories/circle_envs_10k_bsplined"
+    pointcloud_root: "/home/dhkang225/2D_sim/data/pointcloud/circle_envs_10k/circle_envs_10k"
+    batch_size: 32
+    num_workers: 0
+    max_trajectories: 3241  # Use all available trajectories
+    use_bsplined: true
+    augment_data: false
+    num_points: 2000
+  valid:
+    dataset: "trajectory"
+    trajectory_root: "/home/dhkang225/2D_sim/data/trajectories/circle_envs_10k_bsplined"
+    pointcloud_root: "/home/dhkang225/2D_sim/data/pointcloud/circle_envs_10k/circle_envs_10k"
+    batch_size: 32
+    num_workers: 0
+    max_trajectories: 324   # Use 10% for validation
+    use_bsplined: true
+    augment_data: false
+    num_points: 2000
+  test:
+    dataset: "trajectory"
+    trajectory_root: "/home/dhkang225/2D_sim/data/trajectories/circle_envs_10k_bsplined"
+    pointcloud_root: "/home/dhkang225/2D_sim/data/pointcloud/circle_envs_10k/circle_envs_10k"
+    batch_size: 32
+    num_workers: 0
+    max_trajectories: 324   # Use 10% for testing
+    use_bsplined: true
+    augment_data: false
+    num_points: 2000
+
+model:
+  arch: motion_rcfm
+  prob_path: OT
+  init_dist: 
+    arch: uniform
+  velocity_field:
+    arch: vf_fc_vec_motion
+    in_dim: 25        # current(12) + target(12) + time(1) = 25
+    lat_dim: 2048     # pointcloud features from DGCNN
+    out_dim: 6        # SE(3) twist vector
+    l_hidden: [2048, 1024, 512, 512, 512]
+    activation: ['relu', 'relu', 'relu', 'relu', 'relu']
+    out_activation: 'linear'
+  latent_feature:
+    arch: dgcnn
+    emb_dims: 1024    # Will be 2048 after max+avg pooling
+    k: 20
+    dropout: 0.5
+  ode_solver:
+    arch: RK4
+    n_steps: 20
+
+training:
+  n_epoch: 10
+  print_interval: 50
+  val_interval: 200
+  eval_interval: 500
+  vis_interval: 500
+  save_interval: 1000
+  optimizer:
+    name: adam
+    lr: 0.0005
+    weight_decay: 0.01
+  losses:
+    mse_loss:
+      arch: mse
+      weight: 1.0
+
+trainer: motion  # Use motion-specific trainer
+
+device: cuda
+
+logger:
+  endwith: ['@', '#', '$', '%']
+
+test:
+  num_simulation_trajectories: 50

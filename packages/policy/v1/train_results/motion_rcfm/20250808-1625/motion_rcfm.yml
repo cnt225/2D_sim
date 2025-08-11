@@ -1,0 +1,90 @@
+data:
+  test:
+    augment_data: false
+    batch_size: 4
+    dataset: trajectory
+    max_trajectories: 20
+    num_points: 1000
+    num_workers: 0
+    pointcloud_root: /home/dhkang225/2D_sim/data/pointcloud/circle_envs_10k/circle_envs_10k
+    trajectory_root: /home/dhkang225/2D_sim/data/trajectories/circle_envs_10k_tdot
+    use_bsplined: false
+  train:
+    augment_data: true
+    batch_size: 4
+    dataset: trajectory
+    max_trajectories: 100
+    num_points: 1000
+    num_workers: 0
+    pointcloud_root: /home/dhkang225/2D_sim/data/pointcloud/circle_envs_10k/circle_envs_10k
+    trajectory_root: /home/dhkang225/2D_sim/data/trajectories/circle_envs_10k_tdot
+    use_bsplined: false
+  valid:
+    augment_data: false
+    batch_size: 4
+    dataset: trajectory
+    max_trajectories: 20
+    num_points: 1000
+    num_workers: 0
+    pointcloud_root: /home/dhkang225/2D_sim/data/pointcloud/circle_envs_10k/circle_envs_10k
+    trajectory_root: /home/dhkang225/2D_sim/data/trajectories/circle_envs_10k_tdot
+    use_bsplined: false
+device: cuda
+logger:
+  endwith:
+  - '@'
+  - '#'
+  - $
+  - '%'
+model:
+  arch: motion_rcfm
+  init_dist:
+    arch: uniform
+  latent_feature:
+    arch: dgcnn
+    dropout: 0.5
+    emb_dims: 1024
+    k: 20
+  ode_solver:
+    arch: RK4
+    n_steps: 20
+  prob_path: OT
+  velocity_field:
+    activation:
+    - relu
+    - relu
+    - relu
+    - relu
+    - relu
+    arch: vf_fc_vec_motion
+    in_dim: 25
+    l_hidden:
+    - 2048
+    - 1024
+    - 512
+    - 512
+    - 512
+    lat_dim: 2048
+    out_activation: linear
+    out_dim: 6
+test:
+  num_simulation_trajectories: 50
+trainer: motion
+training:
+  eval_interval: 500
+  losses:
+    mse_loss:
+      arch: mse
+      weight: 1.0
+  n_epoch: 1000
+  optimizer:
+    lr: 0.0005
+    name: adam
+    weight_decay: 0.01
+  print_interval: 50
+  save_interval: 1000
+  val_interval: 200
+  vis_interval: 500
+wandb:
+  entity: cnt225-seoul-national-university
+  project_name: motion_planning_rfm

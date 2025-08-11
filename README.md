@@ -96,23 +96,23 @@ uv sync
 ### **1. 데이터 생성 파이프라인** ✅
 - ✅ **10,000개 환경**: 원형 장애물 기반 포인트클라우드
 - ✅ **10,000개 포즈 페어**: 각 환경별 10개 포즈, 첫 번째 페어 사용
-- ✅ **100개 RRT 궤적**: collision margin 0.05m, pair_1 네이밍
-- ✅ **100개 B-spline 궤적**: 2x 밀도, 90-100% 스무딩 개선
+- ✅ **3,241개 RRT 궤적**: 대규모 데이터셋 생성 완료
+- ✅ **3,241개 B-spline 궤적**: T_dot 계산 포함 완료
+- ✅ **데이터 정리**: 빈 파일 제거, 일관성 검증, 재인덱싱
 
-### **2. SE(3) Riemannian Flow Matching 모델** ✅  
-- ✅ **SE3RFM**: fm-main 스타일 RFM 모델
-- ✅ **3D DGCNN**: 3D 포인트클라우드 인코더 (1024D→2048D)
-- ✅ **SE(3) Encoder**: 4×4 행렬 → 12D 직접 플래튼
-- ✅ **Geometry Encoder**: 타원체 형상 (32D)
-- ✅ **Velocity Field**: 2105D → 6D twist 벡터
-- ✅ **훈련 인프라**: Wandb, 분산 훈련, ODE solver
+### **2. 모션 플래닝 RFM 모델** ✅  
+- ✅ **MotionRCFM**: fm-main 기반 적응 (GraspRCFM → MotionRCFM)
+- ✅ **3D DGCNN**: 포인트클라우드 인코더 (2048D features)
+- ✅ **조건부 입력**: current_T, target_T, time_t, pointcloud
+- ✅ **6D Twist 출력**: SE(3) body frame 속도 벡터
+- ✅ **개선된 T_dot 계산**: scipy.spatial.transform 기반 정확한 계산
 
-### **3. 궤적 품질 개선** ✅
-- ✅ **RRT-Connect 최적화**: collision margin 0.05m
-- ✅ **B-spline 스무딩**: SE(2) 매니폴드 기반
-- ✅ **로봇 지오메트리 수정**: 1.2×0.4m 길쭉한 타원체
-- ✅ **충돌 검증**: RRT + Post-B-spline 충돌 체크
-- ✅ **시각화 개선**: 실제 로봇 크기 반영
+### **3. 훈련 인프라 구축** ✅
+- ✅ **TrajectoryDataset**: 실시간 T_dot 계산, PLY 파일 로딩
+- ✅ **견고한 오류 처리**: 손상된 파일 대체, fallback 포인트클라우드
+- ✅ **Wandb 통합**: motion_planning_rfm 프로젝트
+- ✅ **tmux 백그라운드 실행**: SSH 연결 해제 시에도 안전
+- ✅ **가상환경 분리**: packages/policy/policy_env
 
 ---
 
@@ -123,16 +123,16 @@ uv sync
 - **포즈 페어**: `data/pose_pairs/circle_envs_10k/` (10,000개)
 
 ### **궤적 데이터** 
-- **RRT 궤적**: `data/trajectories/circle_envs_10k/` (**100개 완료**)
+- **RRT 궤적**: `data/trajectories/circle_envs_10k/` (**3,241개 완료**)
   - 파일명: `circle_env_XXXXXX_pair_1_traj_rb3.json`
-  - 환경: 000000-000099 (첫 100개 환경)
+  - 환경: 000000-003240 (정리된 환경)
   - 포즈페어: 각 환경의 첫 번째 페어 사용
   - collision margin: 0.05m
 
-- **B-spline 궤적**: `data/trajectories/circle_envs_10k_bsplined/` (**100개 완료**)
+- **B-spline 궤적**: `data/trajectories/circle_envs_10k_bsplined/` (**3,241개 완료**)
   - 파일명: `circle_env_XXXXXX_pair_1_traj_rb3_bsplined.json`
-  - 2x 밀도 증가, 90-100% 스무딩 개선
-  - 충돌 검증 완료
+  - 실시간 T_dot 계산: body frame 기준 6D twist 벡터
+  - 정리된 고품질 데이터셋
 
 ---
 
@@ -182,28 +182,27 @@ python generate_all_10k.py  # 추후 실행
 
 ---
 
-## 🎯 다음 단계 (연구실 서버)
+## 🎯 현재 상황 (2025.01.09)
 
-### **1. RFM 모델 훈련 준비**
+### **🔥 현재 진행 중: 모션 RFM 학습**
 ```bash
-# 모델 테스트
-cd packages/rfm_policy
-python test_se3_rfm.py
+# 현재 tmux 세션에서 학습 실행 중
+tmux attach-session -t motion_training
+tail -f training_tmux.log
 
-# 설정 확인
-cat configs/se3_rfm_config.yaml
-
-# 훈련 시작 (RTX 4090)
-python train_se3_rfm.py --config configs/se3_rfm_config.yaml
+# Wandb 대시보드 모니터링
+https://wandb.ai/cnt225-seoul-national-university/motion_planning_rfm
 ```
 
-### **2. 데이터 스케일링**
-- 100개 → 1,000개 → 10,000개 환경으로 점진적 확장
-- 궤적 품질 vs 데이터 규모 분석
+### **✅ 학습 환경 설정 완료**
+- **데이터셋**: 3,241개 clean 궤적 (train/valid/test = 90/5/5)
+- **모델**: MotionRCFM (current_T, target_T, time_t, pointcloud → 6D twist)
+- **인프라**: tmux + wandb + 견고한 오류 처리
 
-### **3. 모델 성능 평가**
-- RRT-Connect vs RFM 성능 비교
-- 추론 속도, 궤적 품질, 충돌 회피율
+### **🎯 다음 단계**
+1. **학습 완료 후 성능 평가**
+2. **RRT-Connect vs RFM 비교**
+3. **실시간 궤적 생성 테스트**
 
 ---
 
@@ -232,18 +231,25 @@ python utils/trajectory_visualizer.py <trajectory.json> --save_image
 python pointcloud/utils/quick_visualize.py <env.ply>
 ```
 
-### **모델 관련**
+### **모델 관련 (packages/policy/v1)**
 ```bash
-cd packages/rfm_policy
+cd packages/policy/v1
 
-# 모델 테스트
-python test_se3_rfm.py
+# 가상환경 활성화
+source ../policy_env/bin/activate
 
-# 훈련 시작
-python train_se3_rfm.py --config configs/se3_rfm_config.yaml
+# 모델 테스트 (완료)
+python test_motion_model.py
 
-# 평가
-python evaluation/evaluator.py --model_path <checkpoint>
+# 현재 학습 실행 중 (tmux)
+tmux attach-session -t motion_training
+
+# 학습 진행 확인
+tail -f training_tmux.log
+ps aux | grep python | grep train
+
+# 학습 재시작 (필요시)
+tmux send-keys -t motion_training "PYTHONWARNINGS=ignore python train.py --config configs/motion_rcfm.yml > training_tmux.log 2>&1" Enter
 ```
 
 ---
@@ -251,19 +257,20 @@ python evaluation/evaluator.py --model_path <checkpoint>
 ## 📈 성공 기준
 
 ### **데이터 완료도**
-- ✅ **100개 환경**: RRT + B-spline 궤적 완료
-- 🎯 **1,000개 환경**: 모델 훈련용 데이터셋
-- 🚀 **10,000개 환경**: 최종 대규모 데이터셋
+- ✅ **3,241개 환경**: 고품질 궤적 완료
+- ✅ **데이터 정리**: 일관성 검증, 오류 처리 완료
+- ✅ **T_dot 계산**: body frame 기준 정확한 계산
 
 ### **모델 성능**  
+- 🔥 **현재 학습 중**: Epoch 1 진행 중 (Loss ~5.0)
 - 🎯 **90% 충돌 없는 궤적 생성**
 - 🎯 **RRT 대비 10x 빠른 추론**
 - 🎯 **RRT 대비 2x 부드러운 궤적**
 
 ### **시스템 안정성**
-- 🎯 **분산 훈련 성공** (RTX 4090)
-- 🎯 **Wandb 로깅 안정화**
-- 🎯 **재현 가능한 실험**
+- ✅ **안정적 학습 환경**: tmux + 견고한 오류 처리
+- ✅ **Wandb 로깅**: 실시간 모니터링
+- ✅ **재현 가능한 실험**: 완전한 설정 파일
 
 ---
 
@@ -277,4 +284,4 @@ python evaluation/evaluator.py --model_path <checkpoint>
 
 ---
 
-**현재 상태**: 데이터 생성 완료, RFM 모델 훈련 준비 중 🚀
+**현재 상태**: 모션 RFM 모델 학습 진행 중 🔥 (2025.01.09)
