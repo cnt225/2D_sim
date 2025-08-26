@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-PLY Pointcloud Visualizer
-기존 PLY 파일을 읽고 시각화하거나 이미지로 저장하는 도구
+PLY Visualizer (vis_ply.py)
+PLY 포인트클라우드 파일을 시각화하고 /data/visualized/pointcloud에 저장
 
 사용법:
-    python visualize_pointcloud.py my_env.ply
-    python visualize_pointcloud.py my_env --save-image
-    python visualize_pointcloud.py --list
+    python vis_ply.py my_env.ply
+    python vis_ply.py my_env --save-image
+    python vis_ply.py --list
 """
 
 import argparse
@@ -25,7 +25,7 @@ from pointcloud import PointcloudLoader
 class PointcloudVisualizer:
     """PLY 포인트클라우드 시각화 클래스"""
     
-    def __init__(self, data_dir: str = "data/pointcloud"):
+    def __init__(self, data_dir: str = "/home/dhkang225/2D_sim/data/pointcloud"):
         self.data_dir = data_dir
         self.loader = PointcloudLoader(data_dir)
     
@@ -75,13 +75,10 @@ class PointcloudVisualizer:
                     base_name = clean_filename.replace('.ply', '') if clean_filename.endswith('.ply') else clean_filename
                     output_name = f"{base_name}_scene.jpg"
                 
-                # 환경별 폴더 구조 확인
-                if '/' in filename:
-                    # folder/filename 형태인 경우
-                    folder_name = filename.split('/')[0]
-                    image_path = os.path.join(self.data_dir, folder_name, output_name)
-                else:
-                    image_path = os.path.join(self.data_dir, output_name)
+                # 시각화 이미지를 /data/visualized/pointcloud에 저장
+                visualized_dir = "/home/dhkang225/2D_sim/data/visualized/pointcloud"
+                os.makedirs(visualized_dir, exist_ok=True)
+                image_path = os.path.join(visualized_dir, output_name)
                 
                 plt.savefig(image_path, dpi=150, bbox_inches='tight', facecolor='white')
                 saved_path = image_path
@@ -209,8 +206,8 @@ def main():
         
         if not args.filename and not args.all:
             print("\nUsage:")
-            print("  python visualize_pointcloud.py <filename>")
-            print("  python visualize_pointcloud.py --all --save-image")
+            print("  python vis_ply.py <filename>")
+            print("  python vis_ply.py --all --save-image")
             return
     
     # 모든 파일 처리
@@ -241,11 +238,13 @@ def main():
         else:
             check_filename = args.filename
         
-        # 폴더 구조 확인
+        # 실제 파일 경로 구성
         if '/' in args.filename:
-            file_path = os.path.join("pointcloud", "data", check_filename)
+            # circles_only/circle_env_000050 형태
+            file_path = os.path.join("/home/dhkang225/2D_sim/data/pointcloud", check_filename)
         else:
-            file_path = os.path.join("pointcloud", "data", check_filename)
+            # circle_env_000050 형태 - circles_only 디렉토리에서 찾기
+            file_path = os.path.join("/home/dhkang225/2D_sim/data/pointcloud/circles_only", check_filename)
         
         if not os.path.exists(file_path):
             print(f"Error: File not found: {file_path}")

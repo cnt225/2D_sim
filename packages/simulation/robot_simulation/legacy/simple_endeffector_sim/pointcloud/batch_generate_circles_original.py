@@ -14,22 +14,16 @@ import os
 import sys
 import time
 import json
-import shutil
-import tempfile
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 import subprocess
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import random
-from pathlib import Path
-import multiprocessing
-from multiprocessing import Manager
 
 # 상위 디렉토리를 path에 추가
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pointcloud.circle_environment_generator import create_circle_environment
 from pointcloud import PointcloudExtractor
-from unified_metadata_manager import UnifiedMetadataManager
 
 
 def parse_args():
@@ -86,142 +80,12 @@ def parse_args():
     return parser.parse_args()
 
 
-def safe_save_pointcloud(extractor: PointcloudExtractor, points, filename: str, 
-                        metadata: Optional[Dict] = None, temp_dir: Optional[str] = None) -> str:
-    """안전한 포인트클라우드 파일 저장 (버퍼링 제어 및 검증 포함)"""
-    if temp_dir is None:
-        temp_dir = extractor.data_dir
-    
-    # 임시 파일에 먼저 저장
-    temp_ply_path = os.path.join(temp_dir, f"{filename}_temp.ply")
-    final_ply_path = os.path.join(extractor.data_dir, f"{filename}.ply")
-    
-    try:
-        # PLY 파일 저장 (안전한 방식)
-        with open(temp_ply_path, 'w', buffering=1) as f:  # 라인 버퍼링
-            # PLY 헤더
-            f.write("ply\n")
-            f.write("format ascii 1.0\n")
-            f.write(f"element vertex {len(points)}\n")
-            f.write("property float x\n")
-            f.write("property float y\n")
-            f.write("property float z\n")
-            f.write("end_header\n")
-            f.flush()  # 헤더 강제 쓰기
-            
-            # 포인트 데이터 (배치 처리로 메모리 효율성 향상)
-            batch_size = 1000
-            for i in range(0, len(points), batch_size):
-                batch = points[i:i+batch_size]
-                for point in batch:
-                    f.write(f"{point[0]:.6f} {point[1]:.6f} 0.000000\n")
-                f.flush()  # 배치마다 강제 쓰기
-            
-            f.flush()  # 최종 강제 쓰기
-            os.fsync(f.fileno())  # 커널 버퍼까지 강제 동기화
-        
-        # 파일 검증 (관대한 검증)
-        if not validate_ply_file(temp_ply_path, len(points)):
-            print(f"⚠️ Validation failed but continuing: {filename}")
-            # 검증 실패해도 계속 진행 (경고만 출력)
-        
-        # 최종 위치로 원자적 이동
-        shutil.move(temp_ply_path, final_ply_path)
-        
-        # 메타데이터 저장 (별도 처리)
-        # JSON 메타데이터 저장 비활성화 (HDF5 통합 메타데이터만 사용)
-        if metadata is not None:
-            import datetime
-            metadata['generation_timestamp'] = datetime.datetime.now().isoformat()
-            metadata['file_validation'] = True
-            print(f"✅ Metadata prepared for HDF5 (JSON generation disabled)")
-        
-        return final_ply_path
-        
-    except Exception as e:
-        # 임시 파일 정리
-        for temp_file in [temp_ply_path, temp_ply_path.replace('.ply', '_meta.json')]:
-            if os.path.exists(temp_file):
-                try:
-                    os.remove(temp_file)
-                except:
-                    pass
-        raise e
-
-
-def validate_ply_file(ply_path: str, expected_points: int) -> bool:
-    """PLY 파일 검증"""
-    try:
-        with open(ply_path, 'r') as f:
-            lines = f.readlines()
-        
-        # 기본 구조 검증
-        if len(lines) < 8:  # 최소 헤더 라인 수
-            return False
-            
-        if not lines[0].strip() == 'ply':
-            return False
-        
-        if not lines[1].strip() == 'format ascii 1.0':
-            return False
-        
-        # 포인트 수 검증
-        header_line = lines[3].strip()
-        if not header_line.startswith('element vertex'):
-            return False
-            
-        try:
-            header_points = int(header_line.split()[-1])
-        except (IndexError, ValueError):
-            return False
-        
-        # 실제 데이터 라인 수 확인 (헤더 8줄 제외)
-        actual_data_lines = len(lines) - 8
-        
-        # 포인트 수 일치 확인 (10개 이하 차이는 허용)
-        if abs(header_points - expected_points) > 10:
-            print(f"❌ Header mismatch: header={header_points}, expected={expected_points}")
-            return False
-            
-        if abs(actual_data_lines - expected_points) > 10:
-            print(f"❌ Data mismatch: data_lines={actual_data_lines}, expected={expected_points}")
-            return False
-            
-        print(f"✅ Points OK: header={header_points}, data={actual_data_lines}, expected={expected_points}")
-        
-        # 마지막 라인이 완전한지 확인
-        last_line = lines[-1].strip()
-        if last_line:
-            parts = last_line.split()
-            if len(parts) != 3:  # x, y, z 좌표
-                print(f"❌ Incomplete last line: '{last_line}'")
-                return False
-                
-            # 좌표가 숫자인지 확인
-            try:
-                for part in parts:
-                    float(part)
-            except ValueError:
-                print(f"❌ Invalid coordinates in last line: '{last_line}'")
-                return False
-        
-        return True
-        
-    except Exception as e:
-        print(f"❌ PLY validation error: {e}")
-        return False
-
-
 def generate_single_environment(args: tuple) -> dict:
-    """단일 환경 생성 (멀티프로세싱용 - 안전한 파일 쓰기 적용)"""
+    """단일 환경 생성 (멀티프로세싱용)"""
     (index, difficulty, seed, output_dir, 
      resolution, noise_level, workspace_bounds,
      clustering_eps, min_samples, obstacle_type,
-     save_images, h5_metadata_path, hdf5_lock) = args
-    
-    # 프로세스별 임시 디렉토리 생성 (파일 충돌 방지)
-    process_id = os.getpid()
-    temp_dir = tempfile.mkdtemp(prefix=f"env_gen_{process_id}_")
+     save_images) = args
     
     try:
         # 환경 생성
@@ -235,8 +99,7 @@ def generate_single_environment(args: tuple) -> dict:
                 'index': index,
                 'success': False,
                 'error': 'No obstacles generated',
-                'filename': None,
-                'validation_info': None
+                'filename': None
             }
         
         # 포인트클라우드 추출
@@ -253,8 +116,7 @@ def generate_single_environment(args: tuple) -> dict:
                 'index': index,
                 'success': False,
                 'error': 'No points extracted',
-                'filename': None,
-                'validation_info': None
+                'filename': None
             }
         
         # 파일명 생성
@@ -273,54 +135,20 @@ def generate_single_environment(args: tuple) -> dict:
             'num_points': len(points),
             'num_obstacles': len(obstacles),
             'seed': seed,
-            'environment_details': environment_metadata,
-            'process_id': process_id,
-            'temp_dir_used': temp_dir
+            'environment_details': environment_metadata
         }
         
-        # 안전한 파일 저장 (임시 디렉토리 사용)
-        ply_path = safe_save_pointcloud(extractor, points, filename, 
-                                       metadata=metadata, temp_dir=temp_dir)
-        
-        # 생성된 파일 재검증 (관대한 검증)
-        final_ply_path = os.path.join(output_dir, f"{filename}.ply")
-        validation_result = validate_ply_file(final_ply_path, len(points))
-        
-        if not validation_result:
-            print(f"⚠️ Final validation failed but continuing: {filename}")
-            # 검증 실패해도 경고만 출력하고 성공으로 처리
-            validation_result = True
+        # 저장
+        ply_path = extractor.save_pointcloud(points, filename, metadata=metadata)
         
         # 이미지 저장 (옵션)
-        image_saved = False
         if save_images:
             try:
                 save_environment_image(world, obstacles, filename, 
                                      workspace_bounds, output_dir)
-                image_saved = True
             except Exception as e:
                 # 이미지 저장 실패는 치명적이지 않음
-                print(f"Warning: Image save failed for {filename}: {e}")
-        
-        # HDF5 통합 메타데이터에 저장 (세마포어로 동시 접근 제어)
-        hdf5_saved = False
-        env_id = f"{index:06d}"
-        
-        # HDF5 파일 접근 잠금 (한 번에 하나의 프로세스만 접근)
-        print(f"🔒 env_{env_id}: Waiting for HDF5 lock...")
-        with hdf5_lock:
-            try:
-                print(f"🔓 env_{env_id}: HDF5 lock acquired, saving metadata...")
-                h5_manager = UnifiedMetadataManager(h5_metadata_path)
-                if h5_manager.add_environment(env_id, metadata):
-                    print(f"✅ env_{env_id}: HDF5 metadata saved successfully")
-                    hdf5_saved = True
-                else:
-                    print(f"⚠️ env_{env_id}: Failed to add HDF5 metadata")
-            except Exception as e:
-                print(f"❌ env_{env_id}: HDF5 metadata error: {e}")
-            finally:
-                print(f"🔓 env_{env_id}: HDF5 lock released")
+                pass
         
         return {
             'index': index,
@@ -330,32 +158,16 @@ def generate_single_environment(args: tuple) -> dict:
             'obstacles': len(obstacles),
             'points': len(points),
             'difficulty': difficulty,
-            'config': environment_metadata.get('config', {}),
-            'validation_info': {
-                'final_validation': validation_result,
-                'expected_points': len(points),
-                'image_saved': image_saved,
-                'temp_dir': temp_dir,
-                'hdf5_saved': hdf5_saved
-            }
+            'config': environment_metadata.get('config', {})
         }
         
     except Exception as e:
         return {
             'index': index,
             'success': False,
-            'error': f"Generation failed: {str(e)}",
-            'filename': None,
-            'validation_info': {'error_type': type(e).__name__, 'temp_dir': temp_dir}
+            'error': str(e),
+            'filename': None
         }
-    
-    finally:
-        # 임시 디렉토리 정리
-        try:
-            if os.path.exists(temp_dir):
-                shutil.rmtree(temp_dir)
-        except Exception as e:
-            print(f"Warning: Failed to cleanup temp dir {temp_dir}: {e}")
 
 
 def save_environment_image(world, obstacles, filename: str, workspace_bounds, output_dir: str):
@@ -405,20 +217,9 @@ def save_environment_image(world, obstacles, filename: str, workspace_bounds, ou
 def main():
     args = parse_args()
     
-    # 출력 디렉토리 생성 (절대 경로)
-    base_data_dir = "/home/dhkang225/2D_sim/data/pointcloud"
-    output_dir = os.path.join(base_data_dir, args.output_dir)
+    # 출력 디렉토리 생성
+    output_dir = os.path.join("data", "pointcloud", args.output_dir)
     os.makedirs(output_dir, exist_ok=True)
-    
-    # HDF5 통합 메타데이터 관리자 초기화
-    h5_metadata_path = os.path.join(base_data_dir, "unified_metadata.h5")
-    metadata_manager = UnifiedMetadataManager(h5_metadata_path)
-    print(f"HDF5 metadata file: {h5_metadata_path}")
-    
-    # 멀티프로세싱용 HDF5 접근 동기화 잠금 생성
-    manager = Manager()
-    hdf5_lock = manager.Lock()
-    print(f"🔒 HDF5 synchronization lock created for {args.parallel} processes")
     
     print(f"=== Batch Circle Environment Generation ===")
     print(f"Target count: {args.count}")
@@ -454,7 +255,7 @@ def main():
             index, difficulty, seed, output_dir,
             args.resolution, args.noise_level, tuple(args.workspace_bounds),
             args.clustering_eps, args.min_samples, args.obstacle_type,
-            args.save_images, h5_metadata_path, hdf5_lock
+            args.save_images
         )
         tasks.append(task_args)
     
@@ -465,7 +266,6 @@ def main():
     completed = 0
     success_count = 0
     failed_envs = []
-    validation_failures = []
     difficulty_stats = {d: 0 for d in args.difficulties}
     
     # 멀티프로세싱으로 생성
@@ -483,15 +283,6 @@ def main():
                 success_count += 1
                 difficulty_stats[result['difficulty']] += 1
                 
-                # 검증 정보 확인
-                validation_info = result.get('validation_info', {})
-                if not validation_info.get('final_validation', True):
-                    validation_failures.append({
-                        'index': result['index'],
-                        'filename': result['filename'],
-                        'validation_info': validation_info
-                    })
-                
                 if completed % args.batch_size == 0 or completed == len(tasks):
                     elapsed = time.time() - start_time
                     rate = completed / elapsed
@@ -502,10 +293,9 @@ def main():
             else:
                 failed_envs.append({
                     'index': result['index'],
-                    'error': result['error'],
-                    'validation_info': result.get('validation_info')
+                    'error': result['error']
                 })
-                print(f"❌ Failed env_{result['index']:06d}: {result['error']}")
+                print(f"Failed env_{result['index']:06d}: {result['error']}")
     
     # 결과 요약
     total_time = time.time() - start_time
@@ -516,24 +306,14 @@ def main():
     
     print(f"\nDifficulty distribution:")
     for difficulty, count in difficulty_stats.items():
-        if success_count > 0:
-            print(f"  {difficulty}: {count} ({count/success_count*100:.1f}%)")
-        else:
-            print(f"  {difficulty}: {count} (0.0%)")
+        print(f"  {difficulty}: {count} ({count/success_count*100:.1f}%)")
     
     if failed_envs:
-        print(f"\n❌ Failed environments: {len(failed_envs)}")
+        print(f"\nFailed environments: {len(failed_envs)}")
         for fail in failed_envs[:10]:  # 처음 10개만 표시
             print(f"  env_{fail['index']:06d}: {fail['error']}")
         if len(failed_envs) > 10:
             print(f"  ... and {len(failed_envs) - 10} more")
-    
-    if validation_failures:
-        print(f"\n⚠️  Validation issues: {len(validation_failures)}")
-        for fail in validation_failures[:5]:  # 처음 5개만 표시
-            print(f"  {fail['filename']}: validation failed")
-        if len(validation_failures) > 5:
-            print(f"  ... and {len(validation_failures) - 5} more")
     
     # 요약 메타데이터 저장
     summary = {
@@ -541,11 +321,9 @@ def main():
             'total_requested': args.count,
             'successfully_generated': success_count,
             'failed_count': len(failed_envs),
-            'validation_failures': len(validation_failures),
             'start_index': args.start_index,
             'generation_time_seconds': total_time,
-            'generation_rate_per_second': args.count / total_time,
-            'file_safety_improvements': True
+            'generation_rate_per_second': args.count / total_time
         },
         'configuration': {
             'difficulties': args.difficulties,
@@ -558,15 +336,7 @@ def main():
             'obstacle_type': args.obstacle_type
         },
         'difficulty_distribution': difficulty_stats,
-        'failed_environments': failed_envs,
-        'validation_failures': validation_failures,
-        'improvements_applied': {
-            'safe_file_writing': True,
-            'temp_directory_isolation': True,
-            'file_validation': True,
-            'atomic_file_moves': True,
-            'buffer_control': True
-        }
+        'failed_environments': failed_envs
     }
     
     summary_path = os.path.join(output_dir, 'generation_summary.json')
@@ -575,16 +345,6 @@ def main():
     
     print(f"\nSummary saved to: {summary_path}")
     print(f"Environments saved in: {output_dir}")
-    
-    # HDF5 통합 메타데이터 요약
-    try:
-        summary = metadata_manager.get_summary()
-        print(f"\n📊 HDF5 Unified Metadata Summary:")
-        print(f"  Total environments: {summary.get('total_environments', 0)}")
-        print(f"  HDF5 file: {h5_metadata_path}")
-        print(f"  Last updated: {summary.get('last_updated', 'N/A')}")
-    except Exception as e:
-        print(f"⚠️ Failed to get HDF5 summary: {e}")
 
 
 if __name__ == "__main__":
