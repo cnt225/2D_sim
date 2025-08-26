@@ -24,7 +24,7 @@ from pathlib import Path
 
 # 현재 디렉토리에서 import
 from circle_environment_generator import create_circle_environment
-from pointcloud_extractor import PointcloudExtractor
+from utils.pointcloud_extractor import PointcloudExtractor
 
 
 def parse_args():

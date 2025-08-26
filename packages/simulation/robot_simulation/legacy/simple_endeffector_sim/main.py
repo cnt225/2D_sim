@@ -5,6 +5,7 @@ import numpy as np
 from robot_simulation.core.env import make_world, list_available_pointclouds
 from robot_simulation.legacy.simple_endeffector_sim.simulation import RobotSimulation
 from robot_simulation.core.render import draw_world
+from pointcloud import PointcloudLoader
 
 # 명령행 인자 파싱
 def parse_args():

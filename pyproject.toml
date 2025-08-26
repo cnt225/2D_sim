@@ -5,24 +5,50 @@ description = "SE(3) Rigid Body simulation with Riemannian Flow Matching policy 
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 dependencies = [
+    # HDF5 and data management
     "h5py>=3.14.0",
+    
+    # Scientific computing
+    "numpy>=1.24.4",
+    "scipy>=1.10.1",
     "matplotlib>=3.10.5",
+    "scikit-learn>=1.7.1",
+    
+    # Configuration and data formats
     "omegaconf>=2.3.0",
+    "pyyaml>=6.0",
+    "plyfile>=1.0.0",
+    
+    # Motion planning and collision detection
     "ompl>=1.7.0",
-    # "robot-data-generator",
-    # "robot-rfm-policy",
-    # "robot-simulation",
+    "box2d>=2.3.10",
+    
+    # Computer vision and 3D processing
     "open3d>=0.19.0",
     "opencv-python>=4.12.0.88",
-    "pytorch-fid-wrapper>=0.0.4",
-    "scikit-learn>=1.7.1",
-    "tensorboardx>=2.6.4",
+    "trimesh>=4.7.4",
+    
+    # Machine Learning
     "torch>=2.8.0",
     "torchdiffeq>=0.2.5",
     "torchvision>=0.23.0",
-    "tqdm>=4.67.1",
-    "trimesh>=4.7.4",
+    "pytorch-fid-wrapper>=0.0.4",
+    
+    # Simulation and games
+    "pygame>=2.6.1",
+    
+    # Monitoring and logging
+    "tensorboardx>=2.6.4",
     "wandb>=0.21.1",
+    "tqdm>=4.67.1",
+    
+    # Parallel processing
+    "joblib>=1.4.2",
+    
+    # Commented workspace packages - enable when ready
+    # "robot-data-generator",
+    # "robot-rfm-policy", 
+    # "robot-simulation",
 ]
 
 [project.optional-dependencies]

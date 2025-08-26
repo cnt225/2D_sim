@@ -1,10 +1,9 @@
 """
-Pointcloud utilities module.
+Pointcloud utilities module (legacy).
 
 Core pointcloud processing utilities:
-- pointcloud_extractor: Extract pointclouds from Box2D environments
+- pointcloud_extractor: Extract pointclouds from Box2D environments  
 - pointcloud_loader: Load pointclouds and create Box2D environments
-- vis_ply: Visualize PLY pointcloud files
 """
 
 from .pointcloud_extractor import PointcloudExtractor

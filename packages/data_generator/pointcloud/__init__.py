@@ -13,7 +13,7 @@ Usage:
     new_world = loader.load_and_create_world("my_env")
 """
 
-from .pointcloud_loader import PointcloudLoader
-from .pointcloud_extractor import PointcloudExtractor
+from .utils.pointcloud_loader import PointcloudLoader
+from .utils.pointcloud_extractor import PointcloudExtractor
 
 __all__ = ['PointcloudLoader', 'PointcloudExtractor']
