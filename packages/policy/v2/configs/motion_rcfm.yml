@@ -1,0 +1,95 @@
+wandb:
+  entity: cnt225-seoul-national-university
+  project_name: motion_planning_rfm_v2
+
+data:
+  train:
+    dataset: Motion_step_dataset
+    trajectory_root: "/home/dhkang225/2D_sim/data/trajectories/circle_envs_10k_bsplined_tdelta_se3_velocity"
+    pointcloud_root: "/home/dhkang225/2D_sim/data/pointcloud/circle_envs_10k/circle_envs_10k"
+    split: train
+    max_trajectories: 2000   # Reduced for stability
+    use_bsplined: true
+    num_point_cloud: 2000
+    num_twists: 1000     # equivalent to num_grasps in fm-main
+    scale: 1.0
+    augmentation: true
+    normalize_twist: false
+    exclude_corrupted_files: true  # Exclude 256KB truncated PLY files
+    # normalization_stats_path: "configs/normalization_stats.json"
+    batch_size: 8
+    num_workers: 0
+  valid:
+    dataset: Motion_step_dataset
+    trajectory_root: "/home/dhkang225/2D_sim/data/trajectories/circle_envs_10k_bsplined_tdelta_se3_velocity"
+    pointcloud_root: "/home/dhkang225/2D_sim/data/pointcloud/circle_envs_10k/circle_envs_10k"
+    split: valid
+    max_trajectories: 200    # Proportional validation set
+    use_bsplined: true
+    num_point_cloud: 2000
+    num_twists: 1000
+    scale: 1.0
+    augmentation: false
+    normalize_twist: false
+    exclude_corrupted_files: true  # Exclude 256KB truncated PLY files
+    # normalization_stats_path: "configs/normalization_stats.json"
+    batch_size: 8
+    num_workers: 0
+  test:
+    dataset: Motion_step_dataset
+    trajectory_root: "/home/dhkang225/2D_sim/data/trajectories/circle_envs_10k_bsplined_tdelta_se3_velocity"
+    pointcloud_root: "/home/dhkang225/2D_sim/data/pointcloud/circle_envs_10k/circle_envs_10k"
+    split: test
+    max_trajectories: 5      # Debug test
+    use_bsplined: true
+    num_point_cloud: 2000
+    num_twists: 1000
+    scale: 1.0
+    augmentation: false
+    normalize_twist: false
+    # normalization_stats_path: "configs/normalization_stats.json"
+    batch_size: 8
+    num_workers: 0
+
+model:
+  arch: motion_rcfm  # New model type for motion planning
+  prob_path: OT
+  init_dist: 
+    arch: uniform
+    radius: 1
+  velocity_field:
+    arch: vf_fc_vec_grasp    # Use grasp velocity field for fm-main compatibility
+    in_dim: 28               # current(12) + target(12) + time(1) + geometry(3) = 28
+    lat_dim: 2048           # pointcloud features from DGCNN
+    out_dim: 6              # SE(3) twist vector [ω, v]
+    l_hidden: [2048, 1024, 512, 512, 512]
+    activation: ['relu', 'relu', 'relu', 'relu', 'relu']
+    out_activation: 'linear'
+  latent_feature:
+    arch: dgcnn
+    emb_dims: 1024          # Will be 2048 after max+avg pooling
+    k: 5                    # Reduced for debugging
+    dropout: 0.5
+  ode_solver:
+    arch: RK4
+    n_steps: 20
+
+training:
+  n_epoch: 50              # Extended training
+  print_interval: 1        # 매 스텝마다 로그 출력
+  val_interval: 5          # 5 스텝마다 validation
+  eval_interval: 2000
+  vis_interval: 2000
+  save_interval: 10        # 10 스텝마다 저장 (더 자주 저장)
+  optimizer:
+    name: adam
+    lr: 0.0001  # Reduced from 0.0005 for stability
+    weight_decay: 0.01
+
+trainer: motion  # Use motion-specific trainer (to be created)
+
+logger:
+  endwith: ['@', '#', '$', '%']
+
+test:
+  num_simulation_trajectories: 100

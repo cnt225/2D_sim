@@ -1,0 +1,65 @@
+wandb:
+  entity: hajunsu
+  project_name: grasping
+data:
+  train:
+    dataset: Acronym_rcfm
+    split: train
+    obj_types: ['Mug']
+    num_grasps: 2000
+    augmentation: True
+    batch_size: 4
+    num_workers: 0
+  valid:
+    dataset: Acronym_rcfm
+    split: valid
+    obj_types: ['Mug']
+    num_grasps: 2000
+    augmentation: False
+    batch_size: 4
+    num_workers: 0
+  test:
+    dataset: Acronym_rcfm
+    split: test
+    obj_types: ['Mug']
+    num_grasps: 2000
+    augmentation: False
+    batch_size: 4
+    num_workers: 0
+model:
+  arch: grasp_rcfm
+  prob_path: OT
+  init_dist: 
+    arch: uniform
+    radius: 1
+  velocity_field:
+    arch: vf_fc_vec_grasp
+    in_dim: 13
+    lat_dim: 2048
+    out_dim: 6
+    l_hidden: [2048, 1024, 512, 512, 512, ]
+    activation: ['relu', 'relu', 'relu', 'relu', 'relu', ]
+    out_activation: 'linear'
+  latent_feature:
+    arch: dgcnn
+    emb_dims: 1024
+    k: 20
+    dropout: 0.5
+  ode_solver:
+    arch: RK4
+    n_steps: 20
+training:
+  n_epoch: 10000
+  print_interval: 100
+  val_interval: 1000
+  eval_interval: 10000
+  vis_interval: 10000
+  save_interval: 100000
+  optimizer:
+    name: adam
+    lr: 0.0005
+trainer: grasp
+logger:
+  endwith: ['@', '#', '$', '%']
+test:
+  num_simulation_grasps: 100

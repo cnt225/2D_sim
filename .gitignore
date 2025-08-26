@@ -1,9 +1,14 @@
-# Exclude everything except packages and src
+# Exclude everything except essential files and packages/src
 /*
 !/packages/
 !/src/
 !/.gitignore
 !/README.md
+!/pyproject.toml
+!/uv.lock
+
+# Exclude fm-main (reference only)
+fm-main/
 
 # Python-generated files
 __pycache__/
@@ -39,6 +44,8 @@ packages/policy/rfm_policy/
 checkpoints/
 runs/
 logs/
+**/train_results/
+**/inference_results/
 
 # Temporary files
 *.tmp

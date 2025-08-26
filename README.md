@@ -2,6 +2,23 @@
 
 **SE(3) Rigid Body 시뮬레이션 및 Riemannian Flow Matching 정책 학습 프로젝트**
 
+## ⚡ 빠른 시작 (Virtual Environment)
+
+```bash
+# 1. 가상환경 활성화 (필수!)
+source .venv/bin/activate
+
+# 2. v2에서 motion 모델 훈련 (디버깅)
+cd packages/policy/v2
+python train.py --config configs/motion_rcfm.yml
+
+# 3. v1에서 motion 모델 훈련 (정규화 버전)
+cd packages/policy/v1  
+python train.py --config configs/motion_rcfm_normalized.yml
+```
+
+**⚠️ 중요**: 반드시 `source .venv/bin/activate`로 가상환경을 먼저 활성화하세요!
+
 ## 📋 프로젝트 개요
 
 **SE(3) Rigid Body** 환경에서 **Riemannian Flow Matching (RFM)** 기반 AI 정책을 학습하여 **RRT-Connect를 대체하는 학습 기반 경로 계획**을 개발하는 프로젝트입니다.

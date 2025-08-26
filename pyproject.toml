@@ -5,10 +5,24 @@ description = "SE(3) Rigid Body simulation with Riemannian Flow Matching policy 
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 dependencies = [
+    "h5py>=3.14.0",
+    "matplotlib>=3.10.5",
+    "omegaconf>=2.3.0",
     "ompl>=1.7.0",
-    "robot-data-generator",
-    "robot-rfm-policy",
-    "robot-simulation",
+    # "robot-data-generator",
+    # "robot-rfm-policy",
+    # "robot-simulation",
+    "open3d>=0.19.0",
+    "opencv-python>=4.12.0.88",
+    "pytorch-fid-wrapper>=0.0.4",
+    "scikit-learn>=1.7.1",
+    "tensorboardx>=2.6.4",
+    "torch>=2.8.0",
+    "torchdiffeq>=0.2.5",
+    "torchvision>=0.23.0",
+    "tqdm>=4.67.1",
+    "trimesh>=4.7.4",
+    "wandb>=0.21.1",
 ]
 
 [project.optional-dependencies]
@@ -22,13 +36,13 @@ dev = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.uv.workspace]
-members = ["packages/*"]
+# [tool.uv.workspace]
+# members = ["packages/*"]  # Temporarily disabled for simpler setup
 
-[tool.uv.sources]
-robot-data-generator = { workspace = true }
-robot-rfm-policy = { workspace = true }
-robot-simulation = { workspace = true }
+# [tool.uv.sources]
+# robot-data-generator = { workspace = true }
+# robot-rfm-policy = { workspace = true }
+# robot-simulation = { workspace = true }
 
 [tool.uv]
 dev-dependencies = [
