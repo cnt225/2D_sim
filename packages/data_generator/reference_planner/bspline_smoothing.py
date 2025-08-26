@@ -1,6 +1,7 @@
 """
 B-spline 궤적 스무딩 구현
 SE(2) 매니폴드 상에서 RRT 궤적을 부드럽게 스무딩
+SE(3) 쿼터니언 기반 스무딩 지원 (신규)
 """
 
 import json
@@ -9,6 +10,16 @@ import matplotlib.pyplot as plt
 from scipy import interpolate
 from scipy.spatial.distance import cdist
 from pathlib import Path
+import sys
+
+# SE3 functions import for quaternion operations
+sys.path.append(str(Path(__file__).parent.parent.parent / 'utils'))
+from SE3_functions import (
+    bspline_quaternion_smoothing,
+    trajectory_euler_to_quaternion,
+    trajectory_quaternion_to_euler,
+    quaternion_slerp_interpolation
+)
 
 
 def normalize_angle(angle):
@@ -401,5 +412,298 @@ def create_bsplined_trajectory_file(input_trajectory_file, output_dir=None,
     return str(output_file_path)
 
 
+# === 쿼터니언 기반 B-spline 스무딩 함수들 (신규 추가) ===
+
+def bspline_quaternion_trajectory_smoother(trajectory_7d, num_points=None, degree=3):
+    """
+    쿼터니언 기반 B-spline 스무딩
+    - 위치: 기존 B-spline 방식
+    - 회전: SLERP 기반 스무딩
+    
+    Args:
+        trajectory_7d: [N, 7] 궤적 - [[x,y,z,qw,qx,qy,qz], ...]
+        num_points: 출력 포인트 수 (None이면 입력 * 2)
+        degree: B-spline 차수
+    
+    Returns:
+        [M, 7] 스무딩된 쿼터니언 궤적
+    """
+    if isinstance(trajectory_7d, list):
+        trajectory_7d = np.array(trajectory_7d)
+    
+    if len(trajectory_7d.shape) != 2 or trajectory_7d.shape[1] != 7:
+        raise ValueError(f"Expected [N, 7] trajectory, got shape {trajectory_7d.shape}")
+    
+    N = trajectory_7d.shape[0]
+    if N < 2:
+        return trajectory_7d
+    
+    if num_points is None:
+        num_points = N * 2
+    
+    print(f"🔄 Quaternion B-spline smoothing: {N} → {num_points} waypoints")
+    
+    # bspline_quaternion_smoothing 함수 사용 (SE3_functions에서 구현됨)
+    smoothed_trajectory = bspline_quaternion_smoothing(trajectory_7d, num_points, degree)
+    
+    return smoothed_trajectory
+
+
+def create_bsplined_trajectory_hdf5(hdf5_file, env_id, rb_id, input_trajectory_type='raw',
+                                   degree=3, density_multiplier=2):
+    """
+    HDF5 내에서 직접 B-spline 스무딩 적용
+    
+    Args:
+        hdf5_file: h5py.File 객체
+        env_id: 환경 ID
+        rb_id: 로봇 ID
+        input_trajectory_type: 입력 궤적 타입 ('raw')
+        degree: B-spline 차수
+        density_multiplier: 밀도 배수
+    
+    Returns:
+        int: 스무딩 처리된 궤적 수
+    """
+    import h5py
+    
+    print(f"🚀 HDF5 B-spline smoothing for {env_id}/rb_{rb_id}")
+    
+    # 입력 그룹 경로
+    input_path = f"trajectories/{input_trajectory_type}/{env_id}/rb_{rb_id}"
+    output_path = f"trajectories/bsplined/{env_id}/rb_{rb_id}"
+    
+    if input_path not in hdf5_file:
+        print(f"⚠️ No input trajectories found: {input_path}")
+        return 0
+    
+    # 출력 그룹 생성
+    if output_path not in hdf5_file:
+        hdf5_file.create_group(output_path)
+    
+    input_group = hdf5_file[input_path]
+    output_group = hdf5_file[output_path]
+    
+    processed_count = 0
+    
+    for traj_key in input_group.keys():
+        if not traj_key.startswith('traj_'):
+            continue
+        
+        try:
+            # 원본 궤적 로드 (7D)
+            trajectory_7d = input_group[traj_key][...]
+            
+            if trajectory_7d.shape[1] != 7:
+                print(f"⚠️ Skipping {traj_key}: expected 7D data, got {trajectory_7d.shape}")
+                continue
+            
+            # B-spline 스무딩 적용
+            smoothed_7d = bspline_quaternion_trajectory_smoother(
+                trajectory_7d,
+                num_points=len(trajectory_7d) * density_multiplier,
+                degree=degree
+            )
+            
+            # HDF5에 저장
+            if traj_key in output_group:
+                del output_group[traj_key]  # 기존 데이터 교체
+            
+            smoothed_dataset = output_group.create_dataset(
+                traj_key,
+                data=smoothed_7d,
+                compression='gzip',
+                compression_opts=6
+            )
+            
+            # 메타데이터 복사 및 추가
+            original_attrs = dict(input_group[traj_key].attrs)
+            for key, value in original_attrs.items():
+                smoothed_dataset.attrs[key] = value
+            
+            # B-spline 메타데이터 추가
+            smoothed_dataset.attrs['smoothing_method'] = 'quaternion_bspline'
+            smoothed_dataset.attrs['bspline_degree'] = degree
+            smoothed_dataset.attrs['density_multiplier'] = density_multiplier
+            smoothed_dataset.attrs['original_waypoints'] = len(trajectory_7d)
+            smoothed_dataset.attrs['smoothed_waypoints'] = len(smoothed_7d)
+            
+            processed_count += 1
+            print(f"✅ Processed {traj_key}: {len(trajectory_7d)} → {len(smoothed_7d)} waypoints")
+            
+        except Exception as e:
+            print(f"❌ Error processing {traj_key}: {e}")
+    
+    print(f"🎯 B-spline smoothing complete: {processed_count} trajectories processed")
+    return processed_count
+
+
+def calculate_quaternion_trajectory_metrics(trajectory_7d):
+    """
+    쿼터니언 궤적의 부드러움 메트릭 계산
+    
+    Args:
+        trajectory_7d: [N, 7] 쿼터니언 궤적
+    
+    Returns:
+        dict: 부드러움 메트릭
+    """
+    if len(trajectory_7d) < 3:
+        return {"position_smoothness": 0.0, "rotation_smoothness": 0.0, "total_rotation": 0.0}
+    
+    # 위치 부분 [x, y, z]
+    positions = trajectory_7d[:, :3]
+    
+    # 쿼터니언 부분 [qw, qx, qy, qz]
+    quaternions = trajectory_7d[:, 3:7]
+    
+    # 위치 스무딩 메트릭 (기존 방식)
+    pos_velocities = np.diff(positions, axis=0)
+    pos_accelerations = np.diff(pos_velocities, axis=0)
+    pos_jerks = np.diff(pos_accelerations, axis=0)
+    
+    position_smoothness = np.mean(np.linalg.norm(pos_jerks, axis=1)) if len(pos_jerks) > 0 else 0.0
+    
+    # 회전 스무딩 메트릭 (쿼터니언 각속도 변화)
+    rotation_changes = []
+    total_rotation = 0.0
+    
+    for i in range(1, len(quaternions)):
+        q1 = quaternions[i-1]
+        q2 = quaternions[i]
+        
+        # 쿼터니언 내적으로 회전 각도 계산
+        dot = np.abs(np.dot(q1, q2))
+        dot = np.clip(dot, 0.0, 1.0)  # 수치 안정성
+        
+        angle_change = 2 * np.arccos(dot)
+        rotation_changes.append(angle_change)
+        total_rotation += angle_change
+    
+    # 회전 가속도 (각속도 변화율)
+    rotation_accelerations = np.diff(rotation_changes) if len(rotation_changes) > 1 else []
+    rotation_smoothness = np.std(rotation_accelerations) if len(rotation_accelerations) > 0 else 0.0
+    
+    metrics = {
+        "position_smoothness": position_smoothness,
+        "rotation_smoothness": rotation_smoothness,
+        "total_rotation": total_rotation,
+        "path_length": np.sum(np.linalg.norm(np.diff(positions, axis=0), axis=1)),
+        "num_waypoints": len(trajectory_7d),
+        "avg_rotation_per_step": total_rotation / len(rotation_changes) if rotation_changes else 0.0
+    }
+    
+    return metrics
+
+
+def compare_smoothing_methods(trajectory_6d, num_points=None):
+    """
+    기존 6D 오일러각 vs 새로운 7D 쿼터니언 스무딩 비교
+    
+    Args:
+        trajectory_6d: [N, 6] 오일러각 궤적 [x,y,z,rx,ry,rz]
+        num_points: 출력 포인트 수
+    
+    Returns:
+        dict: 비교 결과
+    """
+    if len(trajectory_6d) < 2:
+        return {}
+    
+    if num_points is None:
+        num_points = len(trajectory_6d) * 2
+    
+    print(f"🔄 Comparing smoothing methods: {len(trajectory_6d)} → {num_points} waypoints")
+    
+    # 1. 기존 방식: SE(3) → SE(2) → B-spline → SE(2) → SE(3)
+    se2_trajectory = trajectory_6d[:, [0, 1, 5]]  # x, y, rz만 사용
+    se2_smoothed = bspline_trajectory_smoother(se2_trajectory, num_points)
+    
+    # SE(2) → SE(3) 변환
+    euler_smoothed = np.zeros((len(se2_smoothed), 6))
+    euler_smoothed[:, [0, 1, 5]] = se2_smoothed  # x, y, rz
+    # z, rx, ry는 0으로 유지
+    
+    # 2. 새로운 방식: SE(3) → 쿼터니언 → SLERP B-spline → 쿼터니언 → SE(3)
+    trajectory_7d = trajectory_euler_to_quaternion(trajectory_6d)
+    quaternion_smoothed_7d = bspline_quaternion_trajectory_smoother(trajectory_7d, num_points)
+    quaternion_smoothed_6d = trajectory_quaternion_to_euler(quaternion_smoothed_7d)
+    
+    # 3. 메트릭 계산
+    original_metrics = calculate_smoothness_metrics(trajectory_6d[:, [0, 1, 5]])  # SE(2)
+    euler_metrics = calculate_smoothness_metrics(euler_smoothed[:, [0, 1, 5]])
+    quat_metrics = calculate_quaternion_trajectory_metrics(quaternion_smoothed_7d)
+    
+    results = {
+        'original_6d': trajectory_6d,
+        'euler_smoothed_6d': euler_smoothed,
+        'quaternion_smoothed_7d': quaternion_smoothed_7d,
+        'quaternion_smoothed_6d': quaternion_smoothed_6d,
+        'metrics': {
+            'original': original_metrics,
+            'euler_smoothed': euler_metrics,
+            'quaternion_smoothed': quat_metrics
+        },
+        'comparison': {
+            'euler_improvement': {
+                'curvature_variance': ((original_metrics['curvature_variance'] - euler_metrics['curvature_variance']) / original_metrics['curvature_variance'] * 100) if original_metrics['curvature_variance'] > 0 else 0,
+                'jerk_norm': ((original_metrics['jerk_norm'] - euler_metrics['jerk_norm']) / original_metrics['jerk_norm'] * 100) if original_metrics['jerk_norm'] > 0 else 0
+            },
+            'quaternion_advantage': {
+                'rotation_smoothness': quat_metrics['rotation_smoothness'],
+                'total_rotation': quat_metrics['total_rotation']
+            }
+        }
+    }
+    
+    return results
+
+
+def main_quaternion_example():
+    """쿼터니언 기반 스무딩 예제"""
+    print("🧪 Quaternion B-spline Smoothing Example")
+    
+    # 테스트 궤적 생성 (간단한 SE(3) 궤적)
+    N = 20
+    t = np.linspace(0, 2*np.pi, N)
+    
+    test_trajectory_6d = np.zeros((N, 6))
+    test_trajectory_6d[:, 0] = np.cos(t)  # x
+    test_trajectory_6d[:, 1] = np.sin(t)  # y
+    test_trajectory_6d[:, 2] = t * 0.1    # z (상승)
+    test_trajectory_6d[:, 5] = t          # yaw (회전)
+    
+    print(f"Test trajectory: {N} waypoints")
+    
+    # 스무딩 방법 비교
+    results = compare_smoothing_methods(test_trajectory_6d, num_points=40)
+    
+    if results:
+        print("\n📊 Smoothing Comparison Results:")
+        print(f"Original jerk norm: {results['metrics']['original']['jerk_norm']:.4f}")
+        print(f"Euler smoothed jerk norm: {results['metrics']['euler_smoothed']['jerk_norm']:.4f}")
+        print(f"Quaternion rotation smoothness: {results['metrics']['quaternion_smoothed']['rotation_smoothness']:.4f}")
+        
+        print(f"\nEuler method improvements:")
+        for key, value in results['comparison']['euler_improvement'].items():
+            print(f"  {key}: {value:.1f}%")
+        
+        print(f"\nQuaternion advantages:")
+        for key, value in results['comparison']['quaternion_advantage'].items():
+            print(f"  {key}: {value:.4f}")
+    
+    return results
+
+
 if __name__ == "__main__":
-    main()
+    # 기존 main 또는 새로운 쿼터니언 예제 선택
+    print("Choose example:")
+    print("1. Traditional SE(2) B-spline smoothing")
+    print("2. New quaternion-based SE(3) smoothing")
+    
+    choice = input("Enter choice (1 or 2): ").strip()
+    
+    if choice == "2":
+        main_quaternion_example()
+    else:
+        main()

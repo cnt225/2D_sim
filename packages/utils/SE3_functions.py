@@ -1,14 +1,375 @@
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
-from utils.Lie_old import *
-from utils.Lie import *
+# from utils.Lie_old import *  # Commented out - not needed for our SE(3) functions
+# from utils.Lie import *  # Commented out - not needed for our SE(3) functions
 import scipy
+import scipy.interpolate
 import math
-import utils.LieGroup_torch as LieGroup
+# import utils.LieGroup_torch as LieGroup  # Commented out - not needed
 
 import time
 
+#--custom added
+# =========================
+# ADD-ONLY: SE(3) Trajectory Utilities (arc-length, time policy, labels, integration)
+# Prefix: traj_
+# =========================
+import torch
+
+# ---------- Lie helpers ----------
+def _so3_hat(w):
+    wx, wy, wz = w[...,0], w[...,1], w[...,2]
+    O = torch.zeros_like(wx)
+    return torch.stack([
+        torch.stack([ O, -wz,  wy], dim=-1),
+        torch.stack([ wz,  O, -wx], dim=-1),
+        torch.stack([-wy,  wx,  O], dim=-1),
+    ], dim=-2)
+
+def _so3_log(R):
+    tr = R[...,0,0] + R[...,1,1] + R[...,2,2]
+    cos_th = ((tr - 1) * 0.5).clamp(-1., 1.)
+    th = torch.acos(cos_th)
+    K = torch.stack([R[...,2,1]-R[...,1,2],
+                     R[...,0,2]-R[...,2,0],
+                     R[...,1,0]-R[...,0,1]], dim=-1) * 0.5
+    small = th < 1e-6
+    scale = torch.where(small, torch.ones_like(th), th/torch.sin(th))
+    return K * scale.unsqueeze(-1)
+
+def _so3_exp(w):
+    th = torch.linalg.norm(w, dim=-1, keepdim=True)
+    W = _so3_hat(w)
+    I = torch.eye(3, dtype=w.dtype, device=w.device).expand_as(W[..., :3, :3])
+    small = th < 1e-6
+    A = torch.where(small, 1 - th**2/6, torch.sin(th)/th)
+    B = torch.where(small, 0.5 - th**2/24, (1 - torch.cos(th))/(th**2))
+    return I + A.unsqueeze(-1)*W + B.unsqueeze(-1)*(W @ W)
+
+def _se3_log(T):
+    R = T[..., :3, :3]
+    p = T[..., :3, 3]
+    w = _so3_log(R)
+    th = torch.linalg.norm(w, dim=-1, keepdim=True)
+    I = torch.eye(3, dtype=T.dtype, device=T.device).expand_as(R)
+    W = _so3_hat(w)
+    small = th < 1e-6
+    A = torch.where(small, 1 - th**2/6, torch.sin(th)/th)
+    B = torch.where(small, 0.5 - th**2/24, (1 - torch.cos(th))/(th**2))
+    C = torch.where(small, (1/6) - th**2/120, (1 - A)/(th**2))
+    V = I + B.unsqueeze(-1)*W + C.unsqueeze(-1)*(W @ W)
+    v = torch.linalg.solve(V, p.unsqueeze(-1)).squeeze(-1)
+    return torch.cat([w, v], dim=-1)  # [*,6]
+
+def _se3_exp(xi):
+    w, v = xi[..., :3], xi[..., 3:]
+    R = _so3_exp(w)
+    th = torch.linalg.norm(w, dim=-1, keepdim=True)
+    W = _so3_hat(w)
+    I = torch.eye(3, dtype=xi.dtype, device=xi.device).expand_as(R)
+    small = th < 1e-6
+    A = torch.where(small, 1 - th**2/6, torch.sin(th)/th)
+    B = torch.where(small, 0.5 - th**2/24, (1 - torch.cos(th))/(th**2))
+    C = torch.where(small, (1/6) - th**2/120, (1 - A)/(th**2))
+    V = I + B.unsqueeze(-1)*W + C.unsqueeze(-1)*(W @ W)
+    p = (V @ v.unsqueeze(-1)).squeeze(-1)
+    T = torch.zeros((*xi.shape[:-1], 4, 4), dtype=xi.dtype, device=xi.device)
+    T[..., :3, :3] = R
+    T[..., :3, 3]  = p
+    T[..., 3, 3]   = 1.0
+    return T
+
+# ---------- 1) Arc-length & resampling ----------
+def traj_arc_length_from_T(Ttraj, lambda_rot: float = 0.0):
+    """
+    누적 길이 s와 세그먼트 길이 dℓ 계산.
+    lambda_rot: m/rad 환산 가중(0이면 병진만)
+    """
+    p = Ttraj[..., :3, 3]
+    dp = p[1:] - p[:-1]
+    dpos = torch.linalg.norm(dp, dim=-1)  # [N-1]
+    if lambda_rot > 0:
+        R = Ttraj[..., :3, :3]
+        dR = R[:-1].transpose(-1, -2) @ R[1:]
+        dtheta = torch.linalg.norm(_so3_log(dR), dim=-1)
+        dlen = torch.sqrt(dpos**2 + (lambda_rot * dtheta)**2)
+    else:
+        dlen = dpos
+    s = torch.cat([torch.zeros(1, dtype=Ttraj.dtype, device=Ttraj.device),
+                   torch.cumsum(dlen, dim=0)])
+    return s, dlen  # s:[N], dlen:[N-1]
+
+def _traj_slerp_R(R1, R2, tau):
+    R_rel = R1.transpose(-1, -2) @ R2
+    w = _so3_log(R_rel)
+    return R1 @ _so3_exp(w * tau)
+
+def traj_resample_by_arclength(Ttraj, num_samples: int, lambda_rot: float = 0.0):
+    """
+    호길이 균등으로 T를 재샘플 (p: 선형, R: SLERP).
+    """
+    N = Ttraj.shape[0]
+    s, _ = traj_arc_length_from_T(Ttraj, lambda_rot=lambda_rot)
+    L = s[-1]
+    if float(L) == 0.0:
+        idx = torch.zeros(num_samples, dtype=torch.long, device=Ttraj.device)
+        return Ttraj[idx], torch.linspace(0, 0, num_samples, device=Ttraj.device, dtype=Ttraj.dtype)
+    s_targets = torch.linspace(0, L, num_samples, device=Ttraj.device, dtype=Ttraj.dtype)
+    seg = torch.clamp(torch.searchsorted(s[1:], s_targets, right=True), max=N-2)
+    s0, s1 = s[seg], s[seg+1]
+    tau = torch.where((s1 - s0) > 0, (s_targets - s0)/(s1 - s0), torch.zeros_like(s_targets))
+    Tout = []
+    for i in range(num_samples):
+        k = int(seg[i])
+        T0, T1 = Ttraj[k], Ttraj[k+1]
+        p = (1 - tau[i]) * T0[:3, 3] + tau[i] * T1[:3, 3]
+        R = _traj_slerp_R(T0[:3, :3], T1[:3, :3], tau[i])
+        T = torch.eye(4, dtype=Ttraj.dtype, device=Ttraj.device)
+        T[:3, :3], T[:3, 3] = R, p
+        Tout.append(T)
+    return torch.stack(Tout, dim=0), s_targets  # [M,4,4], [M]
+
+# ---------- 2) Time policy (uniform / curvature) ----------
+def _traj_curvature_discrete(p):
+    N = p.shape[0]
+    kappa = torch.zeros(N, dtype=p.dtype, device=p.device)
+    if N < 3: return kappa
+    a = torch.linalg.norm(p[2:] - p[1:-1], dim=-1)
+    b = torch.linalg.norm(p[1:-1] - p[:-2], dim=-1)
+    c = torch.linalg.norm(p[2:] - p[:-2], dim=-1)
+    s = 0.5 * (a + b + c)
+    area = torch.sqrt(torch.clamp(s*(s-a)*(s-b)*(s-c), min=1e-18))
+    R = (a*b*c) / (4.0 * torch.clamp(area, min=1e-12))
+    kappa_mid = 1.0 / torch.clamp(R, min=1e-9)
+    kappa[1:-1] = kappa_mid
+    return kappa
+
+def traj_dt_from_length(Ttraj_resampled, policy: str = "curvature",
+                        v_ref: float = 0.4, v_cap: float = 0.5,
+                        a_lat_max: float = 1.0, eps: float = 1e-6):
+    """
+    Δt 시퀀스 계산.
+    policy='uniform'  : Δt=Δs/v_ref
+    policy='curvature': v=min(sqrt(a_lat_max/(κ+eps)), v_cap)
+    """
+    p = Ttraj_resampled[..., :3, 3]
+    ds = torch.linalg.norm(p[1:] - p[:-1], dim=-1)  # [M-1]
+    if policy == "uniform":
+        v = torch.full_like(ds, float(v_ref))
+    elif policy == "curvature":
+        kappa = _traj_curvature_discrete(p)
+        k_mid = 0.5*(kappa[:-1] + kappa[1:])
+        v_curv = torch.sqrt(a_lat_max / torch.clamp(k_mid + eps, min=eps))
+        v = torch.minimum(v_curv, torch.full_like(v_curv, float(v_cap)))
+    else:
+        raise ValueError("policy must be 'uniform' or 'curvature'")
+    dt = ds / torch.clamp(v, min=1e-6)
+    return dt  # [M-1]
+
+# ---------- 3) Average body-twist labels ----------
+def traj_average_body_twist_labels(Ttraj, dt_seq):
+    """
+    평균 body twist 라벨: xi_k = log(T_k^{-1}T_{k+1}) / Δt_k
+    반환: [M,6] (마지막 0 패딩)
+    """
+    T_rel = torch.linalg.inv(Ttraj[:-1]) @ Ttraj[1:]
+    xi = _se3_log(T_rel) / dt_seq.unsqueeze(-1)
+    out = torch.zeros((Ttraj.shape[0], 6), dtype=Ttraj.dtype, device=Ttraj.device)
+    out[:-1] = xi
+    return out
+
+# ---------- 4) Integrators ----------
+def traj_integrate_by_twist(T0, xi_seq, dt_seq, time_scale: float = 1.0, dt_max: float | None = None):
+    """
+    piecewise-constant body twist 적분: T_{k+1} = T_k * exp(xi_k * Δt_k)
+    - time_scale: Δt 전체 스케일(시간 팽창/축소; '속도' 하이퍼)
+    - dt_max    : 모델-인더-루프가 아닌 '고정 xi_seq'에서는 정확도 변화 없음(분할해도 같은 결과).
+                  다만 일관성 이유로 인터페이스 제공.
+    """
+    T = T0.clone()
+    traj = [T.clone()]
+    scaled_dt = dt_seq * float(time_scale)
+    for k in range(xi_seq.shape[0]):
+        # (고정 xi) 서브스텝 분할은 수학적으로 동일 → 1스텝 처리
+        dT = _se3_exp(xi_seq[k] * scaled_dt[k])
+        T = T @ dT
+        traj.append(T.clone())
+    return torch.stack(traj, dim=0)
+
+def traj_integrate_by_Tdot(T0, Tdot_seq, dt_seq, time_scale: float = 1.0):
+    """
+    Tdot 기반 적분: 매 스텝 현재 T에서 body twist로 변환 후 exp 적분.
+    (Tdot_k는 구간 평균으로 가정)
+    """
+    T = T0.clone()
+    traj = [T.clone()]
+    scaled_dt = dt_seq * float(time_scale)
+    for k in range(Tdot_seq.shape[0]):
+        Tinvdot = torch.linalg.inv(T) @ Tdot_seq[k]
+        W = Tinvdot[:3,:3]; v = Tinvdot[:3,3]
+        w = torch.stack([W[2,1]-W[1,2], W[0,2]-W[2,0], W[1,0]-W[0,1]], dim=0) * 0.5
+        xi = torch.cat([w, v], dim=0)
+        T = T @ _se3_exp(xi * scaled_dt[k])
+        traj.append(T.clone())
+    return torch.stack(traj, dim=0)
+
+# ---------- 5) SE(3) Smoothing with B-spline + SLERP ----------
+def traj_smooth_se3_bspline_slerp(Ttraj_raw, pos_method="bspline_scipy", degree=3, smooth=0.0):
+    """
+    SE(3) 궤적 스무딩: 위치는 B-spline, 자세는 SLERP
+    
+    Args:
+        Ttraj_raw: [N,4,4] 원시 SE(3) 궤적
+        pos_method: 위치 스무딩 방법 ("bspline_scipy" | "linear")
+        degree: B-spline 차수 (3=cubic, 기본값)
+        smooth: 스무딩 강도 (0.0=보간, >0=스무딩)
+    
+    Returns:
+        Ttraj_smooth: [N,4,4] 스무딩된 SE(3) 궤적
+    """
+    import scipy.interpolate
+    
+    N = Ttraj_raw.shape[0]
+    if N < 2:
+        return Ttraj_raw.clone()
+    
+    # Parameter sequence (0 to N-1)
+    t_orig = torch.arange(N, dtype=Ttraj_raw.dtype, device=Ttraj_raw.device)
+    
+    # Extract positions and rotations
+    positions = Ttraj_raw[:, :3, 3].cpu().numpy()  # [N, 3]
+    rotations = Ttraj_raw[:, :3, :3]  # [N, 3, 3]
+    
+    # 1) Position smoothing with B-spline
+    if pos_method == "bspline_scipy" and N > degree:
+        # Use scipy B-spline for position smoothing
+        smoothed_pos = np.zeros_like(positions)
+        t_np = t_orig.cpu().numpy()
+        
+        for dim in range(3):
+            if smooth > 0.0:
+                # Smoothing spline
+                tck = scipy.interpolate.splrep(t_np, positions[:, dim], s=smooth, k=min(degree, N-1))
+            else:
+                # Interpolating spline
+                tck = scipy.interpolate.splrep(t_np, positions[:, dim], s=0, k=min(degree, N-1))
+            smoothed_pos[:, dim] = scipy.interpolate.splev(t_np, tck)
+        
+        # Convert back to torch
+        positions_smooth = torch.tensor(smoothed_pos, dtype=Ttraj_raw.dtype, device=Ttraj_raw.device)
+    else:
+        # Fallback to linear (no smoothing for positions)
+        positions_smooth = Ttraj_raw[:, :3, 3]
+    
+    # 2) Rotation smoothing with SLERP-based approach
+    if N == 2:
+        # Simple SLERP for 2 points
+        rotations_smooth = rotations.clone()
+    else:
+        # For multiple points, smooth via quaternion SLERP
+        rotations_smooth = torch.zeros_like(rotations)
+        
+        for i in range(N):
+            if i == 0:
+                # First point - keep original
+                rotations_smooth[i] = rotations[i]
+            elif i == N-1:
+                # Last point - keep original
+                rotations_smooth[i] = rotations[i]
+            else:
+                # Middle points - average with neighbors using SLERP
+                R_prev = rotations[i-1]
+                R_curr = rotations[i]
+                R_next = rotations[i+1]
+                
+                # SLERP smoothing: blend current with averaged neighbors
+                alpha = 0.3  # Smoothing strength (0=no smoothing, 0.5=heavy smoothing)
+                
+                # Average previous and next rotations via SLERP
+                R_avg_prev_curr = _traj_slerp_R(R_prev, R_curr, 0.5)
+                R_avg_curr_next = _traj_slerp_R(R_curr, R_next, 0.5)
+                R_neighbors_avg = _traj_slerp_R(R_avg_prev_curr, R_avg_curr_next, 0.5)
+                
+                # Blend with original
+                rotations_smooth[i] = _traj_slerp_R(R_curr, R_neighbors_avg, alpha * smooth if smooth > 0 else alpha)
+    
+    # 3) Reconstruct SE(3) matrices
+    Ttraj_smooth = torch.zeros_like(Ttraj_raw)
+    Ttraj_smooth[:, :3, :3] = rotations_smooth
+    Ttraj_smooth[:, :3, 3] = positions_smooth
+    Ttraj_smooth[:, 3, 3] = 1.0
+    
+    return Ttraj_smooth
+
+
+# ---------- 6) All-in-one helper ----------
+def traj_build_labels_with_policy(Ttraj_raw,
+                                  num_samples: int = 200,
+                                  lambda_rot: float = 0.0,
+                                  policy: str = "curvature",
+                                  v_ref: float = 0.4,
+                                  v_cap: float = 0.5,
+                                  a_lat_max: float = 1.0):
+    """
+    1) 호길이 재샘플(선형+SLERP) → 2) 시간정책 Δt → 3) 평균 body twist 라벨.
+    반환: T_resampled [M,4,4], dt_seq [M-1], xi_labels [M,6]
+    """
+    T_res, _ = traj_resample_by_arclength(Ttraj_raw, num_samples, lambda_rot=lambda_rot)
+    dt_seq = traj_dt_from_length(T_res, policy=policy, v_ref=v_ref, v_cap=v_cap, a_lat_max=a_lat_max)
+    xi_labels = traj_average_body_twist_labels(T_res, dt_seq)
+    return T_res, dt_seq, xi_labels
+
+
+# ---------- 7) Complete SE(3) Pipeline ----------
+def traj_process_se3_pipeline(Ttraj_raw,
+                              smooth_first: bool = True,
+                              pos_method: str = "bspline_scipy",
+                              degree: int = 3,
+                              smooth: float = 0.0,
+                              num_samples: int = 200,
+                              lambda_rot: float = 0.0,
+                              policy: str = "curvature",
+                              v_ref: float = 0.4,
+                              v_cap: float = 0.5,
+                              a_lat_max: float = 1.0):
+    """
+    Complete SE(3) trajectory processing pipeline:
+    1) Optional smoothing → 2) Arc-length resampling → 3) Time policy → 4) Body twist labels
+    
+    Args:
+        Ttraj_raw: [N,4,4] Raw SE(3) trajectory
+        smooth_first: Whether to smooth before processing
+        pos_method: Position smoothing method
+        degree: B-spline degree
+        smooth: Smoothing strength
+        num_samples: Number of output samples
+        lambda_rot: Rotation weight in arc-length
+        policy: Time policy ("uniform" | "curvature")
+        v_ref: Reference velocity
+        v_cap: Velocity cap
+        a_lat_max: Maximum lateral acceleration
+    
+    Returns:
+        T_processed: [M,4,4] Processed trajectory
+        dt_seq: [M-1] Time intervals
+        xi_labels: [M,6] Body twist labels
+        T_smooth: [N,4,4] Smoothed trajectory (if smooth_first=True)
+    """
+    # Step 1: Optional smoothing
+    if smooth_first:
+        T_smooth = traj_smooth_se3_bspline_slerp(Ttraj_raw, pos_method, degree, smooth)
+        T_input = T_smooth
+    else:
+        T_smooth = None
+        T_input = Ttraj_raw
+    
+    # Step 2-4: Arc-length resampling + time policy + labels
+    T_processed, dt_seq, xi_labels = traj_build_labels_with_policy(
+        T_input, num_samples, lambda_rot, policy, v_ref, v_cap, a_lat_max)
+    
+    return T_processed, dt_seq, xi_labels, T_smooth
+#-- custom added end
 
 def SE3_interpolation(Ttraj, step, dt=None):
     length = len(Ttraj)
@@ -947,3 +1308,303 @@ def resample_traj_torch(traj, length):
     traj_length = [traj[i].unsqueeze(0) for i in indices]
     traj_length = torch.cat(traj_length, dim=0)
     return traj_length
+
+
+# === HDF5 궤적 데이터 변환 유틸리티 (추가) ===
+
+def euler_6d_to_quaternion_7d(pose_6d):
+    """
+    오일러각 6D → 쿼터니언 7D 변환
+    Args: 
+        pose_6d: [x, y, z, rx, ry, rz] (numpy array or torch tensor)
+    Returns: 
+        [x, y, z, qw, qx, qy, qz] (same type as input)
+    """
+    if isinstance(pose_6d, torch.Tensor):
+        # PyTorch version
+        if len(pose_6d.shape) == 1:
+            pose_6d = pose_6d.unsqueeze(0)
+        
+        # 위치 부분
+        position = pose_6d[:, :3]  # [x, y, z]
+        
+        # 오일러각 부분 (rx, ry, rz)
+        euler = pose_6d[:, 3:6]
+        
+        # 오일러각 → 회전 행렬
+        R = exp_so3(skew(euler))  # 기존 함수 활용
+        
+        # 회전 행렬 → 쿼터니언
+        # R → quaternion 변환 (wxyz 순서)
+        trace = R[:, 0, 0] + R[:, 1, 1] + R[:, 2, 2]
+        
+        qw = torch.sqrt(1.0 + trace) / 2.0
+        qx = (R[:, 2, 1] - R[:, 1, 2]) / (4.0 * qw)
+        qy = (R[:, 0, 2] - R[:, 2, 0]) / (4.0 * qw)
+        qz = (R[:, 1, 0] - R[:, 0, 1]) / (4.0 * qw)
+        
+        # [x, y, z, qw, qx, qy, qz] 형태로 결합
+        quaternion_part = torch.stack([qw, qx, qy, qz], dim=1)
+        pose_7d = torch.cat([position, quaternion_part], dim=1)
+        
+        if pose_6d.shape[0] == 1:
+            pose_7d = pose_7d.squeeze(0)
+        
+        return pose_7d
+    else:
+        # NumPy version
+        if len(pose_6d.shape) == 1:
+            pose_6d = pose_6d.reshape(1, -1)
+        
+        # Convert to torch, process, then convert back
+        pose_6d_torch = torch.tensor(pose_6d, dtype=torch.float32)
+        pose_7d_torch = euler_6d_to_quaternion_7d(pose_6d_torch)
+        pose_7d = pose_7d_torch.detach().numpy()
+        
+        if pose_6d.shape[0] == 1:
+            pose_7d = pose_7d.squeeze(0)
+        
+        return pose_7d
+
+
+def quaternion_7d_to_euler_6d(pose_7d):
+    """
+    쿼터니언 7D → 오일러각 6D 변환  
+    Args: 
+        pose_7d: [x, y, z, qw, qx, qy, qz] (numpy array or torch tensor)
+    Returns: 
+        [x, y, z, rx, ry, rz] (same type as input)
+    """
+    if isinstance(pose_7d, torch.Tensor):
+        # PyTorch version
+        if len(pose_7d.shape) == 1:
+            pose_7d = pose_7d.unsqueeze(0)
+        
+        # 위치 부분
+        position = pose_7d[:, :3]  # [x, y, z]
+        
+        # 쿼터니언 부분 (qw, qx, qy, qz)
+        qw, qx, qy, qz = pose_7d[:, 3], pose_7d[:, 4], pose_7d[:, 5], pose_7d[:, 6]
+        
+        # 쿼터니언 → 회전 행렬
+        R = torch.zeros(pose_7d.shape[0], 3, 3).to(pose_7d)
+        
+        R[:, 0, 0] = 1 - 2*(qy*qy + qz*qz)
+        R[:, 0, 1] = 2*(qx*qy - qw*qz)
+        R[:, 0, 2] = 2*(qx*qz + qw*qy)
+        R[:, 1, 0] = 2*(qx*qy + qw*qz)
+        R[:, 1, 1] = 1 - 2*(qx*qx + qz*qz)
+        R[:, 1, 2] = 2*(qy*qz - qw*qx)
+        R[:, 2, 0] = 2*(qx*qz - qw*qy)
+        R[:, 2, 1] = 2*(qy*qz + qw*qx)
+        R[:, 2, 2] = 1 - 2*(qx*qx + qy*qy)
+        
+        # 회전 행렬 → 오일러각
+        W = log_SO3(R)  # 기존 함수 활용
+        euler = skew(W)  # skew matrix → vector
+        
+        # [x, y, z, rx, ry, rz] 형태로 결합
+        pose_6d = torch.cat([position, euler], dim=1)
+        
+        if pose_7d.shape[0] == 1:
+            pose_6d = pose_6d.squeeze(0)
+        
+        return pose_6d
+    else:
+        # NumPy version
+        if len(pose_7d.shape) == 1:
+            pose_7d = pose_7d.reshape(1, -1)
+        
+        # Convert to torch, process, then convert back
+        pose_7d_torch = torch.tensor(pose_7d, dtype=torch.float32)
+        pose_6d_torch = quaternion_7d_to_euler_6d(pose_7d_torch)
+        pose_6d = pose_6d_torch.detach().numpy()
+        
+        if pose_7d.shape[0] == 1:
+            pose_6d = pose_6d.squeeze(0)
+        
+        return pose_6d
+
+
+def trajectory_euler_to_quaternion(trajectory_6d):
+    """
+    궤적 전체를 6D → 7D 변환
+    Args: 
+        trajectory_6d: [N, 6] array - [[x,y,z,rx,ry,rz], ...]
+    Returns: 
+        [N, 7] array - [[x,y,z,qw,qx,qy,qz], ...]
+    """
+    if isinstance(trajectory_6d, list):
+        # List of lists → numpy array
+        trajectory_6d = np.array(trajectory_6d)
+    
+    if len(trajectory_6d.shape) != 2 or trajectory_6d.shape[1] != 6:
+        raise ValueError(f"Expected [N, 6] trajectory, got shape {trajectory_6d.shape}")
+    
+    # Convert each pose
+    trajectory_7d = []
+    for i in range(trajectory_6d.shape[0]):
+        pose_6d = trajectory_6d[i]
+        pose_7d = euler_6d_to_quaternion_7d(pose_6d)
+        trajectory_7d.append(pose_7d)
+    
+    if isinstance(trajectory_6d, torch.Tensor):
+        return torch.stack(trajectory_7d)
+    else:
+        return np.array(trajectory_7d)
+
+
+def trajectory_quaternion_to_euler(trajectory_7d):
+    """
+    궤적 전체를 7D → 6D 변환
+    Args: 
+        trajectory_7d: [N, 7] array - [[x,y,z,qw,qx,qy,qz], ...]
+    Returns: 
+        [N, 6] array - [[x,y,z,rx,ry,rz], ...]
+    """
+    if isinstance(trajectory_7d, list):
+        # List of lists → numpy array
+        trajectory_7d = np.array(trajectory_7d)
+    
+    if len(trajectory_7d.shape) != 2 or trajectory_7d.shape[1] != 7:
+        raise ValueError(f"Expected [N, 7] trajectory, got shape {trajectory_7d.shape}")
+    
+    # Convert each pose
+    trajectory_6d = []
+    for i in range(trajectory_7d.shape[0]):
+        pose_7d = trajectory_7d[i]
+        pose_6d = quaternion_7d_to_euler_6d(pose_7d)
+        trajectory_6d.append(pose_6d)
+    
+    if isinstance(trajectory_7d, torch.Tensor):
+        return torch.stack(trajectory_6d)
+    else:
+        return np.array(trajectory_6d)
+
+
+def quaternion_slerp_interpolation(q1, q2, t):
+    """
+    쿼터니언 SLERP 보간
+    Args:
+        q1: 시작 쿼터니언 [qw, qx, qy, qz]
+        q2: 끝 쿼터니언 [qw, qx, qy, qz]
+        t: 보간 파라미터 (0~1)
+    Returns: 
+        보간된 쿼터니언 [qw, qx, qy, qz]
+    """
+    if isinstance(q1, np.ndarray):
+        q1 = torch.tensor(q1, dtype=torch.float32)
+    if isinstance(q2, np.ndarray):
+        q2 = torch.tensor(q2, dtype=torch.float32)
+    if not isinstance(t, torch.Tensor):
+        t = torch.tensor(t, dtype=torch.float32)
+    
+    # 쿼터니언 정규화
+    q1 = q1 / torch.norm(q1)
+    q2 = q2 / torch.norm(q2)
+    
+    # 내적 계산
+    dot = torch.sum(q1 * q2)
+    
+    # 최단 경로를 위해 음수 내적인 경우 q2 반전
+    if dot < 0.0:
+        q2 = -q2
+        dot = -dot
+    
+    # 선형 보간 임계값
+    DOT_THRESHOLD = 0.9995
+    if dot > DOT_THRESHOLD:
+        # 선형 보간 (거의 같은 방향인 경우)
+        result = q1 + t * (q2 - q1)
+        result = result / torch.norm(result)
+        return result
+    
+    # SLERP 보간
+    theta_0 = torch.acos(torch.clamp(torch.abs(dot), 0.0, 1.0))
+    sin_theta_0 = torch.sin(theta_0)
+    
+    theta = theta_0 * t
+    sin_theta = torch.sin(theta)
+    
+    s0 = torch.cos(theta) - dot * sin_theta / sin_theta_0
+    s1 = sin_theta / sin_theta_0
+    
+    return s0 * q1 + s1 * q2
+
+
+def bspline_quaternion_smoothing(trajectory_7d, num_points=None, degree=3):
+    """
+    쿼터니언 기반 B-spline 스무딩
+    - 위치: 일반 B-spline 보간
+    - 회전: SLERP 기반 보간
+    
+    Args:
+        trajectory_7d: [N, 7] 궤적 - [[x,y,z,qw,qx,qy,qz], ...]
+        num_points: 출력 포인트 수 (None이면 입력과 동일)
+        degree: B-spline 차수
+    Returns:
+        스무딩된 [M, 7] 궤적
+    """
+    if isinstance(trajectory_7d, list):
+        trajectory_7d = np.array(trajectory_7d)
+    
+    if len(trajectory_7d.shape) != 2 or trajectory_7d.shape[1] != 7:
+        raise ValueError(f"Expected [N, 7] trajectory, got shape {trajectory_7d.shape}")
+    
+    N = trajectory_7d.shape[0]
+    if num_points is None:
+        num_points = N
+    
+    if N < 2:
+        return trajectory_7d
+    
+    # Convert to torch for processing
+    if not isinstance(trajectory_7d, torch.Tensor):
+        traj_torch = torch.tensor(trajectory_7d, dtype=torch.float32)
+    else:
+        traj_torch = trajectory_7d
+    
+    # 위치 부분 [x, y, z] - B-spline 보간
+    positions = traj_torch[:, :3]
+    
+    # Parameter values (0 to 1)
+    t_input = torch.linspace(0, 1, N)
+    t_output = torch.linspace(0, 1, num_points)
+    
+    # B-spline interpolation for positions
+    smoothed_positions = torch.zeros(num_points, 3)
+    for dim in range(3):
+        # Simple linear interpolation (can be replaced with proper B-spline)
+        smoothed_positions[:, dim] = torch.interp(t_output, t_input, positions[:, dim])
+    
+    # 쿼터니언 부분 [qw, qx, qy, qz] - SLERP 보간
+    quaternions = traj_torch[:, 3:7]
+    smoothed_quaternions = torch.zeros(num_points, 4)
+    
+    for i in range(num_points):
+        t = t_output[i].item()
+        
+        # Find surrounding quaternions
+        if t <= 0:
+            smoothed_quaternions[i] = quaternions[0]
+        elif t >= 1:
+            smoothed_quaternions[i] = quaternions[-1]
+        else:
+            # Find interpolation indices
+            idx = int(t * (N - 1))
+            if idx >= N - 1:
+                smoothed_quaternions[i] = quaternions[-1]
+            else:
+                local_t = (t * (N - 1)) - idx
+                q1 = quaternions[idx]
+                q2 = quaternions[idx + 1]
+                smoothed_quaternions[i] = quaternion_slerp_interpolation(q1, q2, local_t)
+    
+    # 결합
+    smoothed_trajectory = torch.cat([smoothed_positions, smoothed_quaternions], dim=1)
+    
+    # Convert back to original type
+    if isinstance(trajectory_7d, np.ndarray):
+        return smoothed_trajectory.detach().numpy()
+    else:
+        return smoothed_trajectory

@@ -8,11 +8,11 @@
 """
 
 from .trajectory_smoother import BSplineTrajectoryProcessor
-from .trajectory_visualizer import TrajectoryVisualizer
+from .trajectory_visualizer import HDF5TrajectoryVisualizer
 
 __all__ = [
     'BSplineTrajectoryProcessor',
-    'TrajectoryVisualizer'
+    'HDF5TrajectoryVisualizer'
 ]
 
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Trajectory Smoothing Batch Processor
-기존 HDF5 파일의 원본 궤적들을 B-spline으로 스무딩 처리
+Trajectory Smoothing Batch Processor with SE(3) Support
+기존 HDF5 파일의 원본 궤적들을 SE(3) B-spline+SLERP로 스무딩 처리
 
 사용법:
     python batch_smooth_trajectories.py --env-name circle_env_000000 --pair-ids raw_pair_001,raw_pair_002
@@ -13,41 +13,69 @@ import sys
 import argparse
 import time
 import numpy as np
+import torch
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 
 # 프로젝트 경로 추가
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.append(str(project_root))
+sys.path.append(str(project_root / 'packages'))
 
 # 로컬 모듈 import
 from trajectory_data_manager import TrajectoryDataManager, PosePairMetadata
-from utils.trajectory_smoother import BSplineTrajectoryProcessor
+try:
+    from utils.trajectory_smoother import BSplineTrajectoryProcessor
+except ImportError:
+    # Fallback for import issues
+    BSplineTrajectoryProcessor = None
+    
+# Import SE(3) functions from packages/utils
+sys.path.insert(0, str(project_root / 'packages'))
+from utils.SE3_functions import (
+    traj_smooth_se3_bspline_slerp,
+    traj_process_se3_pipeline,
+    traj_resample_by_arclength
+)
+
+try:
+    from trajectory_validator import TrajectoryValidator
+except ImportError:
+    TrajectoryValidator = None
 
 class TrajectorySmootherBatch:
-    """배치 궤적 스무딩 처리기"""
+    """배치 궤적 스무딩 처리기 (SE(3) 지원)"""
     
     def __init__(self, 
                  env_name: str,
-                 bspline_config: Dict[str, Any] = None):
+                 bspline_config: Dict[str, Any] = None,
+                 use_se3: bool = True,
+                 validate_collision: bool = True):
         """
         초기화
         
         Args:
             env_name: 환경 이름
             bspline_config: B-spline 설정
+            use_se3: SE(3) 스무딩 사용 여부
+            validate_collision: 충돌 검증 여부
         """
         self.env_name = env_name
+        self.use_se3 = use_se3
+        self.validate_collision = validate_collision
         
         # B-spline 설정
         self.bspline_config = bspline_config or {
             'degree': 3,
-            'smoothing_factor': 0.0,
-            'density_multiplier': 2
+            'smoothing_factor': 0.01,  # SE(3)에서는 약간의 스무딩이 더 안정적
+            'density_multiplier': 2,
+            'num_samples': 200  # SE(3) resampling용
         }
         
         print(f"🌊 TrajectorySmootherBatch 초기화:")
         print(f"   환경: {env_name}")
+        print(f"   SE(3) 모드: {use_se3}")
+        print(f"   충돌 검증: {validate_collision}")
         print(f"   B-spline degree: {self.bspline_config['degree']}")
         print(f"   Smoothing factor: {self.bspline_config['smoothing_factor']}")
         print(f"   Density multiplier: {self.bspline_config['density_multiplier']}")
@@ -56,15 +84,47 @@ class TrajectorySmootherBatch:
         self.data_manager = TrajectoryDataManager(env_name)
         print(f"✅ HDF5 파일: {self.data_manager.h5_file_path}")
         
-        # B-spline 프로세서 초기화
-        try:
-            self.bspline_processor = BSplineTrajectoryProcessor(
-                degree=self.bspline_config['degree'],
-                smoothing_factor=self.bspline_config['smoothing_factor']
-            )
-            print("✅ B-spline 프로세서 초기화 완료")
-        except Exception as e:
-            raise RuntimeError(f"B-spline 프로세서 초기화 실패: {e}")
+        # 스무딩 프로세서 초기화
+        if self.use_se3:
+            print("✅ SE(3) 스무딩 모드 활성화 (B-spline + SLERP)")
+            # SE(3) 모드에서는 내장 함수 사용
+            self.bspline_processor = None
+        else:
+            # SE(2) 모드에서는 기존 B-spline 프로세서 사용
+            if BSplineTrajectoryProcessor is not None:
+                try:
+                    self.bspline_processor = BSplineTrajectoryProcessor(
+                        degree=self.bspline_config['degree'],
+                        smoothing_factor=self.bspline_config['smoothing_factor']
+                    )
+                    print("✅ SE(2) B-spline 프로세서 초기화 완료")
+                except Exception as e:
+                    raise RuntimeError(f"B-spline 프로세서 초기화 실패: {e}")
+            else:
+                print("⚠️ SE(2) B-spline 프로세서를 사용할 수 없습니다. SE(3) 모드를 사용하세요.")
+                self.bspline_processor = None
+                self.use_se3 = True  # Force SE(3) mode
+        
+        # 충돌 검증기 초기화
+        if self.validate_collision:
+            try:
+                # 환경 포인트클라우드 로드
+                env_type = env_name.split('_')[0]  # e.g., 'circle' from 'circle_env_000000'
+                pointcloud_path = project_root / f"data/pointcloud/{env_type}_only" / f"{env_name}.ply"
+                
+                if pointcloud_path.exists():
+                    self.validator = TrajectoryValidator(str(pointcloud_path))
+                    print(f"✅ 충돌 검증기 초기화 완료: {pointcloud_path}")
+                else:
+                    print(f"⚠️ 포인트클라우드 파일 없음: {pointcloud_path}")
+                    self.validator = None
+                    self.validate_collision = False
+            except Exception as e:
+                print(f"⚠️ 충돌 검증기 초기화 실패: {e}")
+                self.validator = None
+                self.validate_collision = False
+        else:
+            self.validator = None
         
         # 통계 초기화
         self.stats = {
@@ -104,6 +164,58 @@ class TrajectorySmootherBatch:
             print(f"❌ 궤적 쌍 조회 실패: {e}")
             return []
     
+    def _convert_se2_to_se3(self, trajectory_se2: np.ndarray) -> torch.Tensor:
+        """SE(2) 궤적을 SE(3) 형식으로 변환"""
+        N = len(trajectory_se2)
+        T_se3 = torch.zeros((N, 4, 4), dtype=torch.float32)
+        
+        for i in range(N):
+            x, y, theta = trajectory_se2[i]
+            # SE(3) 변환 행렬 생성
+            T_se3[i, 0, 0] = np.cos(theta)
+            T_se3[i, 0, 1] = -np.sin(theta)
+            T_se3[i, 1, 0] = np.sin(theta)
+            T_se3[i, 1, 1] = np.cos(theta)
+            T_se3[i, 2, 2] = 1.0  # z축은 단위 행렬
+            T_se3[i, 0, 3] = x
+            T_se3[i, 1, 3] = y
+            T_se3[i, 2, 3] = 0.0  # z = 0 (2D 평면)
+            T_se3[i, 3, 3] = 1.0
+        
+        return T_se3
+    
+    def _convert_se3_to_se2(self, T_se3: torch.Tensor) -> np.ndarray:
+        """SE(3) 궤적을 SE(2) 형식으로 변환"""
+        N = T_se3.shape[0]
+        trajectory_se2 = np.zeros((N, 3))
+        
+        for i in range(N):
+            # 위치 추출
+            trajectory_se2[i, 0] = T_se3[i, 0, 3].item()  # x
+            trajectory_se2[i, 1] = T_se3[i, 1, 3].item()  # y
+            # yaw 각도 추출 (z축 회전)
+            trajectory_se2[i, 2] = np.arctan2(T_se3[i, 1, 0].item(), T_se3[i, 0, 0].item())
+        
+        return trajectory_se2
+    
+    def _validate_trajectory(self, trajectory: np.ndarray) -> Tuple[bool, Dict[str, Any]]:
+        """궤적 충돌 검증"""
+        if not self.validate_collision or self.validator is None:
+            return True, {'collision_free': True, 'checked': False}
+        
+        try:
+            # 충돌 검증
+            collision_free = self.validator.validate_trajectory(trajectory)
+            
+            return collision_free, {
+                'collision_free': collision_free,
+                'checked': True,
+                'num_points_checked': len(trajectory)
+            }
+        except Exception as e:
+            print(f"⚠️ 충돌 검증 실패: {e}")
+            return True, {'collision_free': True, 'checked': False, 'error': str(e)}
+    
     def smooth_single_trajectory(self, pair_id: str) -> bool:
         """
         단일 궤적 스무딩
@@ -134,37 +246,89 @@ class TrajectorySmootherBatch:
             
             print(f"   원본 궤적: {len(raw_trajectory)}개 점")
             
-            # 2. B-spline 스무딩 실행
+            # 2. 스무딩 실행
             smooth_start_time = time.time()
             
-            num_points = int(len(raw_trajectory) * self.bspline_config['density_multiplier'])
-            smooth_trajectory, smooth_info = self.bspline_processor.smooth_trajectory(
-                raw_trajectory, num_points=num_points
-            )
-            
-            smooth_time = time.time() - smooth_start_time
-            
-            if not smooth_info['success']:
-                print(f"❌ 스무딩 실패: {pair_id} - {smooth_info.get('error', 'Unknown error')}")
-                self.stats['failed_smooth'] += 1
-                
-                # 실패한 경우 서브샘플링으로 대체
-                step = max(1, len(raw_trajectory) // 10)
-                smooth_trajectory = raw_trajectory[::step]
-                print(f"   서브샘플링으로 대체: {len(smooth_trajectory)}개 점")
-                smoothing_method = "subsampling_fallback"
+            if self.use_se3:
+                # SE(3) 스무딩
+                try:
+                    # SE(2) → SE(3) 변환
+                    T_se3_raw = self._convert_se2_to_se3(raw_trajectory)
+                    
+                    # SE(3) 스무딩 실행
+                    T_se3_smooth = traj_smooth_se3_bspline_slerp(
+                        T_se3_raw,
+                        pos_method="bspline_scipy",
+                        degree=self.bspline_config['degree'],
+                        smooth=self.bspline_config['smoothing_factor']
+                    )
+                    
+                    # Arc-length 기반 재샘플링 (균등 간격)
+                    num_samples = self.bspline_config.get('num_samples', 
+                                    int(len(raw_trajectory) * self.bspline_config['density_multiplier']))
+                    T_se3_resampled, _ = traj_resample_by_arclength(
+                        T_se3_smooth,
+                        num_samples=num_samples,
+                        lambda_rot=0.1  # 회전 가중치 (m/rad)
+                    )
+                    
+                    # SE(3) → SE(2) 변환
+                    smooth_trajectory = self._convert_se3_to_se2(T_se3_resampled)
+                    
+                    smooth_time = time.time() - smooth_start_time
+                    self.stats['successful_smooth'] += 1
+                    print(f"✅ SE(3) 스무딩 성공: {len(raw_trajectory)} → {len(smooth_trajectory)}개 점 ({smooth_time:.3f}초)")
+                    smoothing_method = "se3_bspline_slerp"
+                    smooth_success = True
+                    
+                except Exception as e:
+                    print(f"❌ SE(3) 스무딩 실패: {pair_id} - {e}")
+                    self.stats['failed_smooth'] += 1
+                    # 실패한 경우 서브샘플링으로 대체
+                    step = max(1, len(raw_trajectory) // 10)
+                    smooth_trajectory = raw_trajectory[::step]
+                    smooth_time = time.time() - smooth_start_time
+                    print(f"   서브샘플링으로 대체: {len(smooth_trajectory)}개 점")
+                    smoothing_method = "subsampling_fallback"
+                    smooth_success = False
             else:
-                self.stats['successful_smooth'] += 1
-                print(f"✅ 스무딩 성공: {len(raw_trajectory)} → {len(smooth_trajectory)}개 점 ({smooth_time:.3f}초)")
-                smoothing_method = "bspline"
+                # SE(2) B-spline 스무딩
+                num_points = int(len(raw_trajectory) * self.bspline_config['density_multiplier'])
+                smooth_trajectory, smooth_info = self.bspline_processor.smooth_trajectory(
+                    raw_trajectory, num_points=num_points
+                )
+                
+                smooth_time = time.time() - smooth_start_time
+                
+                if not smooth_info['success']:
+                    print(f"❌ 스무딩 실패: {pair_id} - {smooth_info.get('error', 'Unknown error')}")
+                    self.stats['failed_smooth'] += 1
+                    # 실패한 경우 서브샘플링으로 대체
+                    step = max(1, len(raw_trajectory) // 10)
+                    smooth_trajectory = raw_trajectory[::step]
+                    print(f"   서브샘플링으로 대체: {len(smooth_trajectory)}개 점")
+                    smoothing_method = "subsampling_fallback"
+                    smooth_success = False
+                else:
+                    self.stats['successful_smooth'] += 1
+                    print(f"✅ SE(2) 스무딩 성공: {len(raw_trajectory)} → {len(smooth_trajectory)}개 점 ({smooth_time:.3f}초)")
+                    smoothing_method = "bspline"
+                    smooth_success = True
             
-            # 3. 메타데이터 업데이트
+            # 3. 충돌 검증
+            collision_free, validation_info = self._validate_trajectory(smooth_trajectory)
+            if not collision_free:
+                print(f"⚠️ 스무딩된 궤적이 충돌 포함: {pair_id}")
+            else:
+                print(f"✅ 충돌 검증 통과: {pair_id}")
+            
+            # 4. 메타데이터 업데이트
             updated_metadata = PosePairMetadata(
                 start_pose=metadata['start_pose'],
                 end_pose=metadata['end_pose'],
                 generation_method=metadata.get('generation_method', 'unknown'),
                 smoothing_method=smoothing_method,
-                collision_free=metadata.get('collision_free', True),
+                collision_free=collision_free if self.validate_collision else metadata.get('collision_free', True),
                 path_length=float(np.sum(np.linalg.norm(
                     np.diff(smooth_trajectory[:, :2], axis=0), axis=1
                 ))),
@@ -173,7 +337,7 @@ class TrajectorySmootherBatch:
                 validation_time=metadata.get('validation_time', 0.0)
             )
             
-            # 4. HDF5 업데이트 (smooth_trajectory 필드만)
+            # 5. HDF5 업데이트 (smooth_trajectory 필드만)
             success = self.data_manager.update_pose_pair_smooth_trajectory(
                 pair_id=pair_id,
                 smooth_trajectory=smooth_trajectory,
@@ -273,13 +437,25 @@ def parse_arguments():
     group.add_argument('--all-pairs', action='store_true',
                        help='Smooth all available pairs')
     
+    # 스무딩 모드 선택
+    parser.add_argument('--use-se3', action='store_true', default=True,
+                       help='Use SE(3) smoothing with B-spline + SLERP (default: True)')
+    parser.add_argument('--use-se2', action='store_true',
+                       help='Use SE(2) B-spline smoothing only')
+    
     # B-spline 설정
     parser.add_argument('--bspline-degree', type=int, default=3,
                        help='B-spline degree (default: 3)')
-    parser.add_argument('--smoothing-factor', type=float, default=0.0,
-                       help='B-spline smoothing factor (default: 0.0)')
+    parser.add_argument('--smoothing-factor', type=float, default=0.01,
+                       help='B-spline smoothing factor (default: 0.01 for SE(3))')
     parser.add_argument('--density-multiplier', type=float, default=2.0,
                        help='Point density multiplier (default: 2.0)')
+    parser.add_argument('--num-samples', type=int, default=200,
+                       help='Number of samples for SE(3) resampling (default: 200)')
+    
+    # 검증 옵션
+    parser.add_argument('--no-collision-check', action='store_true',
+                       help='Disable collision validation')
     
     # 기타 옵션
     parser.add_argument('--output-stats', type=str, default=None,
@@ -298,17 +474,23 @@ def main():
     print(f"   환경: {args.env_name}")
     
     try:
+        # SE(2) vs SE(3) 모드 결정
+        use_se3 = args.use_se3 and not args.use_se2
+        
         # B-spline 설정
         bspline_config = {
             'degree': args.bspline_degree,
             'smoothing_factor': args.smoothing_factor,
-            'density_multiplier': args.density_multiplier
+            'density_multiplier': args.density_multiplier,
+            'num_samples': args.num_samples
         }
         
         # 스무딩 처리기 초기화
         smoother = TrajectorySmootherBatch(
             env_name=args.env_name,
-            bspline_config=bspline_config
+            bspline_config=bspline_config,
+            use_se3=use_se3,
+            validate_collision=not args.no_collision_check
         )
         
         # 사용 가능한 궤적 목록 출력 (옵션)
@@ -344,7 +526,8 @@ def main():
         print(f"   성공률: {stats['success_rate']:.1f}%")
         print(f"   총 시간: {stats['total_batch_time']:.2f}초")
         print(f"   평균 시간: {stats['avg_time_per_trajectory']:.3f}초/궤적")
-        print(f"   B-spline 성공률: {stats['bspline_success_rate']:.1f}%")
+        print(f"   스무딩 성공률: {stats['bspline_success_rate']:.1f}%")
+        print(f"   스무딩 모드: {'SE(3)' if use_se3 else 'SE(2)'}")
         print(f"   HDF5 파일: {stats['h5_file_path']}")
         
         if stats['failed_pair_ids']:

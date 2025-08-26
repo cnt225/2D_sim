@@ -13,6 +13,8 @@ dependencies = [
     "ompl",
     "box2d>=2.3.10",  # for collision detection
     "joblib>=1.4.2",  # for parallel processing
+    "torch>=2.0.0",   # for SE(3) trajectory processing
+    "h5py>=3.8.0",    # for HDF5 trajectory data
 ]
 
 [project.optional-dependencies]
