@@ -1,0 +1,97 @@
+wandb:
+  entity: cnt225-seoul-national-university  # Your WandB entity
+  project_name: tdot_rcfm_1500epochs
+  
+data:
+  train:
+    dataset: TdotHDF5
+    hdf5_path: ../../../data/Tdot/circles_only_integrated_trajs_Tdot.h5
+    pointcloud_root: ../../../data/pointcloud/circle_envs
+    split: train
+    max_trajectories: 1600  # 80% of 2000 trajectories
+    augmentation: True  # Enable data augmentation
+    batch_size: 16  # Batch size 16 as requested
+    num_workers: 4  # Enable parallel data loading
+    num_points: 2048  # Full resolution pointcloud
+    trajectory_length: 100
+    step_size: 1
+    
+  valid:
+    dataset: TdotHDF5
+    hdf5_path: ../../../data/Tdot/circles_only_integrated_trajs_Tdot.h5
+    pointcloud_root: ../../../data/pointcloud/circle_envs
+    split: val
+    max_trajectories: 200  # 10% of 2000 trajectories
+    augmentation: False
+    batch_size: 16
+    num_workers: 4
+    num_points: 2048
+    trajectory_length: 100
+    step_size: 1
+    
+  test:
+    dataset: TdotHDF5
+    hdf5_path: ../../../data/Tdot/circles_only_integrated_trajs_Tdot.h5
+    pointcloud_root: ../../../data/pointcloud/circle_envs
+    split: test
+    max_trajectories: 200  # 10% of 2000
+    augmentation: False
+    batch_size: 32
+    num_workers: 4
+    num_points: 2048
+    trajectory_length: 100
+    step_size: 1
+    
+model:
+  arch: motion_rcfm
+  prob_path: OT
+  init_dist:
+    arch: uniform
+    radius: 1
+  velocity_field:
+    arch: vf_fc_motion
+    in_dim: 13  # 6 (twist) + 6 (target twist) + 1 (time)
+    lat_dim: 2048
+    out_dim: 6
+    l_hidden: [2048, 1024, 512, 512, 512]
+    activation: ['relu', 'relu', 'relu', 'relu', 'relu']
+    out_activation: 'linear'
+  latent_feature:
+    arch: dgcnn
+    emb_dims: 1024
+    k: 20
+    dropout: 0.5
+    mode: 'maxavg'  # Use both max and avg pooling
+  ode_solver:
+    arch: RK4
+    n_steps: 20
+    
+training:
+  n_epoch: 1500  # Increased to 1500 epochs
+  print_interval: 50  # Print every 50 iterations
+  val_interval: 100  # Validate every 100 epochs
+  eval_interval: 500
+  vis_interval: 500
+  save_interval: 300  # Save checkpoint every 300 epochs
+  optimizer:
+    name: adam
+    lr: 0.0002  # Scaled up: sqrt(16/4) * 0.0001
+    weight_decay: 0.0001
+  scheduler:
+    name: cosineannealingwarmrestarts
+    T_0: 300  # First restart at 300 epochs
+    T_mult: 2  # Double the period after each restart
+    eta_min: 0.00001
+    warmup_epochs: 50  # Linear warmup for first 50 epochs
+  gradient_clip_norm: 1.0  # Gradient clipping for stability
+  loss:
+    type: mse
+    weight: 1.0
+    
+trainer: motion
+logger:
+  endwith: ['@', '#', '$', '%']
+  
+test:
+  num_test_trajectories: 50
+  visualization: True
