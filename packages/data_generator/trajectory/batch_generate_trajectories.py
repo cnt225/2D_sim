@@ -1,479 +1,572 @@
 #!/usr/bin/env python3
 """
-배치 궤적 생성 스크립트
-HDF5 기반 환경별 궤적 데이터 배치 생성 시스템
-
-주요 기능:
-- 환경별 궤적 배치 생성
-- RRT → B-spline 파이프라인 자동화
-- 충돌 검증 시스템 연동
-- 멀티프로세싱 지원
+Batch Trajectory Generator with SE(3) Smoothing Pipeline
+RRT 생성 + SE(3) 스무딩 + 리샘플링 통합 파이프라인
+기존 batch_generate_raw_trajectories.py와 일관된 구조 유지
 """
 
-import sys
 import os
+import sys
 import argparse
 import time
-import json
-import multiprocessing as mp
-from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
+import h5py
 import numpy as np
+import torch
+from pathlib import Path
+from typing import Dict, List, Tuple, Any, Optional
 
-# 프로젝트 경로 설정
+# 프로젝트 경로 추가
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.append(str(project_root))
+sys.path.append(str(project_root / 'packages'))
 
-# 모듈 import
-from trajectory_data_manager import (
-    TrajectoryDataManager, 
-    PosePairMetadata, 
-    create_environment_info, 
-    create_generation_config
+# 필수 모듈 import
+from rrt_connect import create_se3_planner, SE3TrajectoryResult
+
+# pose 데이터 로드를 위한 모듈
+sys.path.append(str(project_root / "packages" / "data_generator" / "pose"))
+from unified_pose_manager import UnifiedPoseManager
+
+# SE(3) functions
+from packages.utils.SE3_functions import (
+    traj_smooth_se3_bspline_slerp,
+    traj_resample_by_arclength
 )
-from trajectory_validator import TrajectoryValidator
-from utils.trajectory_smoother import BSplineTrajectoryProcessor
 
-# 복사된 모듈 import (로컬 경로 사용)
-try:
-    # trajectory 하위에 복사된 모듈들 사용
-    from rrt_connect import create_se3_planner, SE3TrajectoryResult
-    
-    # pose 관련 함수들 - 기존 경로에서 import (아직 복사 안됨)
-    sys.path.append(str(project_root / "packages" / "data_generator"))
-    from pose.random_pose_generator import generate_collision_free_poses
-    
-    print("✅ 로컬 RRT 모듈 import 성공")
-except ImportError as e:
-    print(f"⚠️ 모듈 import 실패: {e}")
-    generate_collision_free_poses = None
-    create_se3_planner = None
+print("✅ 필수 모듈 import 완료")
 
 
 class TrajectoryBatchGenerator:
-    """배치 궤적 생성기"""
+    """RRT + SE(3) 스무딩 통합 배치 궤적 생성기"""
     
     def __init__(self, 
-                 env_name: str,
-                 pointcloud_file: str,
-                 rigid_body_id: int = 3,
-                 safety_margin: float = 0.05,
-                 rrt_config: Optional[Dict[str, Any]] = None,
-                 bspline_config: Optional[Dict[str, Any]] = None,
-                 validation_enabled: bool = True):
+                 env_set_name: str,
+                 pose_file: str,
+                 rrt_config: Dict[str, Any] = None,
+                 smoothing_config: Dict[str, Any] = None,
+                 validation_enabled: bool = False,
+                 output_format: str = 'se2'):
         """
+        초기화
+        
         Args:
-            env_name: 환경 이름
-            pointcloud_file: 환경 PLY 파일 경로
-            rigid_body_id: Rigid body ID
-            safety_margin: 안전 여유 거리
+            env_set_name: 환경 묶음 이름 (예: 'circles_only')
+            pose_file: Pose 데이터 HDF5 파일명 (root/data/pose/ 기준)
             rrt_config: RRT 설정
-            bspline_config: B-spline 설정
-            validation_enabled: 충돌 검증 활성화
+            smoothing_config: SE(3) 스무딩 설정
+            validation_enabled: 충돌 검증 사용 여부
+            output_format: 궤적 출력 형식 ('se2', 'se3', 'se3_6d', 'quaternion_7d')
         """
-        self.env_name = env_name
-        self.pointcloud_file = pointcloud_file
-        self.rigid_body_id = rigid_body_id
-        self.safety_margin = safety_margin
+        self.env_set_name = env_set_name
         self.validation_enabled = validation_enabled
         
-        # 기본 설정
+        # 출력 형식 검증
+        valid_formats = ['se2', 'se3', 'se3_6d', 'quaternion_7d']
+        if output_format not in valid_formats:
+            raise ValueError(f"❌ 지원하지 않는 출력 형식: {output_format}. 지원 형식: {valid_formats}")
+        self.output_format = output_format
+        
+        # Pose 파일 경로
+        self.pose_file = str(project_root / "data" / "pose" / pose_file)
+        if not Path(self.pose_file).exists():
+            raise FileNotFoundError(f"❌ Pose 파일을 찾을 수 없습니다: {self.pose_file}")
+        
+        # RRT 설정
         self.rrt_config = rrt_config or {
-            'range': 0.5,
-            'max_planning_time': 5.0,
-            'interpolate': True,
-            'simplify': True
+            'rigid_body_id': 3,
+            'max_planning_time': 15.0,
+            'range': 0.25
         }
         
-        self.bspline_config = bspline_config or {
-            'degree': 3,
-            'smoothing_factor': 0.0,
-            'density_multiplier': 2
+        # SE(3) 스무딩 설정
+        self.smoothing_config = smoothing_config or {
+            'min_samples': 100,
+            'max_samples': 500,
+            'smooth_factor': 0.01,
+            'degree': 3
         }
         
-        # 데이터 매니저 초기화
-        self.data_manager = TrajectoryDataManager(env_name)
+        print(f"🏗️ TrajectoryBatchGenerator 초기화:")
+        print(f"   환경 묶음: {env_set_name}")
+        print(f"   Pose 파일: {self.pose_file}")
+        print(f"   출력 형식: {self.output_format}")
+        print(f"   RRT Range: {self.rrt_config['range']}")
+        print(f"   샘플 범위: {self.smoothing_config['min_samples']}-{self.smoothing_config['max_samples']}")
+        print(f"   검증 활성화: {validation_enabled}")
         
-        # RRT 플래너 초기화
+        # Pose 매니저 초기화
         try:
-            self.rrt_planner = create_se3_planner(rigid_body_id, pointcloud_file)
-            print(f"✅ RRT 플래너 초기화 완료")
+            self.pose_manager = UnifiedPoseManager(self.pose_file)
+            print(f"✅ Pose 매니저 초기화 완료")
         except Exception as e:
-            print(f"❌ RRT 플래너 초기화 실패: {e}")
-            self.rrt_planner = None
+            raise RuntimeError(f"❌ Pose 매니저 초기화 실패: {e}")
         
-        # B-spline 프로세서 초기화
-        self.bspline_processor = BSplineTrajectoryProcessor(
-            degree=self.bspline_config['degree'],
-            smoothing_factor=self.bspline_config['smoothing_factor']
-        )
+        # Trajectory 저장소 초기화
+        trajectory_dir = project_root / "data" / "trajectory"
+        trajectory_dir.mkdir(parents=True, exist_ok=True)
+        self.trajectory_file = trajectory_dir / f"{env_set_name}_integrated_trajs.h5"
         
-        # 검증기 초기화 (선택적)
-        self.validator = None
-        if validation_enabled:
-            try:
-                self.validator = TrajectoryValidator(
-                    pointcloud_file=pointcloud_file,
-                    rigid_body_id=rigid_body_id,
-                    safety_margin=safety_margin
-                )
-                print(f"✅ 궤적 검증기 초기화 완료")
-            except Exception as e:
-                print(f"⚠️ 궤적 검증기 초기화 실패: {e}")
-                self.validation_enabled = False
-        
-        # 통계
+        # 통계 초기화
         self.stats = {
-            'total_attempts': 0,
+            'total_environments': 0,
+            'total_pairs': 0,
             'successful_rrt': 0,
-            'successful_smooth': 0,
-            'collision_free': 0,
+            'successful_smoothing': 0,
             'total_time': 0.0
         }
+        
+        # 사용 가능한 환경 목록 로드
+        self._load_available_environments()
+        
+        print(f"✅ 초기화 완료")
+        print(f"   궤적 저장소: {self.trajectory_file}")
+        print(f"   사용 가능한 환경: {len(self.available_environments)}개")
     
-    def initialize_data_manager(self, workspace_bounds: List[float]) -> bool:
-        """데이터 매니저 HDF5 파일 초기화"""
-        env_info = create_environment_info(
-            env_name=self.env_name,
-            env_type="auto_detected",
-            pointcloud_file=self.pointcloud_file,
-            workspace_bounds=workspace_bounds
-        )
-        
-        gen_config = create_generation_config(
-            rigid_body_id=self.rigid_body_id,
-            safety_margin=self.safety_margin,
-            rrt_range=self.rrt_config['range'],
-            rrt_max_time=self.rrt_config['max_planning_time'],
-            bspline_degree=self.bspline_config['degree'],
-            bspline_smoothing=self.bspline_config['smoothing_factor'],
-            validation_enabled=self.validation_enabled
-        )
-        
-        return self.data_manager.initialize_h5_file(env_info, gen_config)
-    
-    def generate_pose_pairs(self, count: int) -> List[Tuple[List[float], List[float]]]:
-        """충돌 없는 pose pair 생성"""
-        print(f"🎯 Pose pair 생성 중... (목표: {count}개)")
-        
+    def _load_available_environments(self):
+        """Pose 파일에서 사용 가능한 환경 목록 로드"""
         try:
-            # 충돌 없는 pose 생성
-            poses = generate_collision_free_poses(
-                environment_file=self.pointcloud_file,
-                robot_geometry=self.rigid_body_id,
-                num_poses=count * 3,  # 여유분을 두고 생성
-                workspace_bounds=(-5, 5, -5, 5),  # 기본 workspace
-                max_attempts=count * 10
+            self.available_environments = []
+            
+            with h5py.File(self.pose_file, 'r') as f:
+                if 'environments' in f:
+                    for env_name in f['environments'].keys():
+                        # RB의 pose pairs가 있는 환경만 포함
+                        env_path = f'environments/{env_name}/pose_pairs/rb_{self.rrt_config["rigid_body_id"]}'
+                        if env_path in f:
+                            self.available_environments.append(env_name)
+            
+            self.available_environments.sort()
+            print(f"✅ 환경 목록 로드 완료: {len(self.available_environments)}개")
+            
+            if len(self.available_environments) == 0:
+                raise ValueError(f"RB {self.rrt_config['rigid_body_id']}에 대한 환경이 없습니다")
+                
+        except Exception as e:
+            raise RuntimeError(f"❌ 환경 목록 로드 실패: {e}")
+    
+    def _determine_num_samples(self, raw_length: int) -> int:
+        """적절한 샘플 수 결정"""
+        min_samples = self.smoothing_config['min_samples']
+        max_samples = self.smoothing_config['max_samples']
+        
+        if raw_length < 50:
+            return max(min_samples, raw_length * 3)
+        elif raw_length < 100:
+            return min(max_samples, raw_length * 2)
+        elif raw_length < 200:
+            return min(max_samples, int(raw_length * 1.5))
+        else:
+            return min(max_samples, raw_length)
+    
+    def _se2_to_se3_matrices(self, se2_traj: np.ndarray) -> torch.Tensor:
+        """SE(2) to SE(3) 변환"""
+        N = len(se2_traj)
+        T_matrices = torch.zeros((N, 4, 4), dtype=torch.float32)
+        
+        for i in range(N):
+            x, y, theta = se2_traj[i]
+            cos_t = np.cos(theta)
+            sin_t = np.sin(theta)
+            
+            T_matrices[i] = torch.tensor([
+                [cos_t, -sin_t, 0, x],
+                [sin_t,  cos_t, 0, y],
+                [0,      0,     1, 0],
+                [0,      0,     0, 1]
+            ], dtype=torch.float32)
+        
+        return T_matrices
+    
+    def _convert_trajectory_format(self, T_matrices: torch.Tensor, format_type: str) -> np.ndarray:
+        """궤적을 지정된 형식으로 변환"""
+        T_np = T_matrices.cpu().numpy() if isinstance(T_matrices, torch.Tensor) else T_matrices
+        N = T_np.shape[0]
+        
+        if format_type == 'se2':
+            # SE(2) [x, y, yaw]
+            result = np.zeros((N, 3))
+            for i in range(N):
+                result[i, 0] = T_np[i, 0, 3]  # x
+                result[i, 1] = T_np[i, 1, 3]  # y
+                result[i, 2] = np.arctan2(T_np[i, 1, 0], T_np[i, 0, 0])  # yaw
+            return result
+            
+        elif format_type == 'se3':
+            # SE(3) 4x4 행렬 그대로
+            return T_np
+            
+        elif format_type == 'se3_6d':
+            # SE(3) 6D [x, y, z, rx, ry, rz]
+            result = np.zeros((N, 6))
+            for i in range(N):
+                result[i, 0] = T_np[i, 0, 3]  # x
+                result[i, 1] = T_np[i, 1, 3]  # y
+                result[i, 2] = T_np[i, 2, 3]  # z
+                result[i, 3] = 0.0  # roll (고정)
+                result[i, 4] = 0.0  # pitch (고정)
+                result[i, 5] = np.arctan2(T_np[i, 1, 0], T_np[i, 0, 0])  # yaw
+            return result
+            
+        elif format_type == 'quaternion_7d':
+            # 쿼터니언 7D [x, y, z, qw, qx, qy, qz]
+            from packages.utils.SE3_functions import trajectory_euler_to_quaternion
+            # 먼저 6D로 변환 후 쿼터니언으로
+            se3_6d = self._convert_trajectory_format(T_matrices, 'se3_6d')
+            result = trajectory_euler_to_quaternion(se3_6d)
+            return result
+            
+        else:
+            raise ValueError(f"지원하지 않는 형식: {format_type}")
+    
+    def _se3_to_se2(self, T_matrices: torch.Tensor) -> np.ndarray:
+        """SE(3) to SE(2) 변환 (호환성 유지)"""
+        return self._convert_trajectory_format(T_matrices, 'se2')
+    
+    def _process_trajectory(self, env_name: str, pair_id: int,
+                           start_pose: List[float], end_pose: List[float]) -> Optional[Dict]:
+        """단일 궤적 생성 및 스무딩"""
+        try:
+            # 1. RRT 궤적 생성
+            pointcloud_path = project_root / "data" / "pointcloud" / self.env_set_name / f"{env_name}.ply"
+            if not pointcloud_path.exists():
+                print(f"❌ 포인트클라우드 없음: {pointcloud_path}")
+                return None
+            
+            # RRT 플래너 생성
+            planner = create_se3_planner(
+                self.rrt_config['rigid_body_id'],
+                str(pointcloud_path)
             )
             
-            if len(poses) < count * 2:
-                print(f"⚠️ 충분한 pose를 생성하지 못했습니다: {len(poses)} < {count * 2}")
-                return []
-            
-            # pose pair 생성
-            pose_pairs = []
-            for i in range(0, min(len(poses) - 1, count * 2), 2):
-                start_pose = poses[i][:3]  # [x, y, theta]
-                end_pose = poses[i + 1][:3]
-                pose_pairs.append((start_pose, end_pose))
-            
-            print(f"✅ Pose pair 생성 완료: {len(pose_pairs)}개")
-            return pose_pairs[:count]
-            
-        except Exception as e:
-            print(f"❌ Pose pair 생성 실패: {e}")
-            return []
-    
-    def generate_single_trajectory(self, 
-                                 start_pose: List[float], 
-                                 end_pose: List[float],
-                                 pair_id: str) -> bool:
-        """단일 궤적 생성 (RRT → B-spline → 검증)"""
-        start_time = time.time()
-        
-        try:
-            # 1. RRT 궤적 계획
-            print(f"🛤️ RRT 궤적 계획 중... ({pair_id})")
-            
-            # SE(2) → SE(3) 변환
+            # SE(3) 형식으로 변환
             start_se3 = [start_pose[0], start_pose[1], 0.0, 0.0, 0.0, start_pose[2]]
             end_se3 = [end_pose[0], end_pose[1], 0.0, 0.0, 0.0, end_pose[2]]
             
             # RRT 계획
-            rrt_result = self.rrt_planner.plan_trajectory(
-                start_se3, end_se3, 
+            rrt_result = planner.plan_trajectory(
+                start_se3, end_se3,
                 max_planning_time=self.rrt_config['max_planning_time']
             )
             
             if not rrt_result.success:
-                print(f"❌ RRT 실패: {pair_id}")
-                return False
+                print(f"❌ RRT 실패")
+                return None
             
+            # RRT 결과를 SE(3) 4x4 행렬로 변환
+            raw_trajectory = np.array(rrt_result.trajectory)
+            raw_se2 = raw_trajectory[:, [0, 1, 5]]  # 임시로 SE(2) 추출
+            
+            print(f"✅ RRT 성공: {len(raw_se2)}개 점, {rrt_result.planning_time:.3f}초")
             self.stats['successful_rrt'] += 1
             
-            # SE(3) → SE(2) 변환
-            raw_trajectory = np.array(rrt_result.trajectory)
-            raw_se2 = raw_trajectory[:, [0, 1, 5]]  # [x, y, rz]
+            # 2. SE(3) 스무딩 및 리샘플링
+            num_samples = self._determine_num_samples(len(raw_se2))
             
-            rrt_time = time.time() - start_time
+            # SE(2) → SE(3) 4x4 행렬 변환
+            T_raw = self._se2_to_se3_matrices(raw_se2)
             
-            # 2. B-spline 스무딩
-            print(f"🌊 B-spline 스무딩 중... ({pair_id})")
-            smooth_start_time = time.time()
-            
-            num_points = int(len(raw_se2) * self.bspline_config['density_multiplier'])
-            smooth_trajectory, smooth_info = self.bspline_processor.smooth_trajectory(
-                raw_se2, num_points=num_points
+            # SE(3) 스무딩
+            T_smooth = traj_smooth_se3_bspline_slerp(
+                T_raw, 
+                degree=self.smoothing_config['degree'],
+                smooth=self.smoothing_config['smooth_factor']
             )
             
-            smooth_time = time.time() - smooth_start_time
+            # 리샘플링
+            T_resampled, _ = traj_resample_by_arclength(T_smooth, num_samples)
             
-            if not smooth_info['success']:
-                print(f"❌ 스무딩 실패: {pair_id} - {smooth_info['error']}")
-                smooth_trajectory = raw_se2  # 원본 사용
-                smooth_time = 0.0
-            else:
-                self.stats['successful_smooth'] += 1
+            # 지정된 형식으로 변환
+            raw_formatted = self._convert_trajectory_format(T_raw, self.output_format)
+            smooth_formatted = self._convert_trajectory_format(T_resampled, self.output_format)
             
-            # 3. 충돌 검증 (선택적)
-            validation_results = None
-            validation_time = 0.0
-            is_collision_free = True
+            print(f"✅ 스무딩 완료: {len(raw_formatted)} → {len(smooth_formatted)}개 점 ({self.output_format} 형식)")
+            self.stats['successful_smoothing'] += 1
             
-            if self.validation_enabled and self.validator is not None:
-                print(f"🔍 충돌 검증 중... ({pair_id})")
-                validation_start_time = time.time()
-                
-                # Raw와 Smooth 궤적 모두 검증
-                validation_results = self.validator.compare_trajectory_safety(
-                    raw_se2, smooth_trajectory
-                )
-                
-                validation_time = time.time() - validation_start_time
-                
-                if validation_results['success']:
-                    is_collision_free = validation_results['smooth_result']['is_collision_free']
-                    if is_collision_free:
-                        self.stats['collision_free'] += 1
-                
-            # 4. 메타데이터 생성
-            metadata = PosePairMetadata(
-                start_pose=start_pose,
-                end_pose=end_pose,
-                generation_method="rrt_connect",
-                smoothing_method="bspline" if smooth_info['success'] else "none",
-                collision_free=is_collision_free,
-                path_length=float(np.sum(np.linalg.norm(
-                    np.diff(smooth_trajectory[:, :2], axis=0), axis=1
-                ))),
-                generation_time=rrt_time,
-                smoothing_time=smooth_time,
-                validation_time=validation_time
-            )
+            # 경로 길이 계산 (위치 좌표 기준)
+            def path_length(traj_formatted):
+                if self.output_format == 'se2':
+                    return np.sum(np.linalg.norm(np.diff(traj_formatted[:, :2], axis=0), axis=1))
+                elif self.output_format in ['se3_6d', 'quaternion_7d']:
+                    return np.sum(np.linalg.norm(np.diff(traj_formatted[:, :3], axis=0), axis=1))
+                elif self.output_format == 'se3':
+                    positions = traj_formatted[:, :3, 3]  # 4x4 행렬에서 위치 추출
+                    return np.sum(np.linalg.norm(np.diff(positions, axis=0), axis=1))
+                else:
+                    return 0.0
             
-            # 5. HDF5에 저장
-            success = self.data_manager.add_pose_pair(
-                pair_id=pair_id,
-                metadata=metadata,
-                raw_trajectory=raw_se2,
-                smooth_trajectory=smooth_trajectory,
-                validation_results=validation_results
-            )
+            return {
+                'raw_trajectory': raw_formatted,
+                'smooth_trajectory': smooth_formatted,
+                'start_pose': start_pose,
+                'end_pose': end_pose,
+                'generation_time': rrt_result.planning_time,
+                'path_length': path_length(smooth_formatted),
+                'waypoint_count': len(smooth_formatted),
+                'smoothing_degree': self.smoothing_config['degree'],
+                'smoothing_factor': self.smoothing_config['smooth_factor'],
+                'output_format': self.output_format
+            }
             
-            total_time = time.time() - start_time
-            self.stats['total_time'] += total_time
-            
-            if success:
-                print(f"✅ 궤적 생성 완료: {pair_id} ({total_time:.2f}초)")
-                return True
-            else:
-                print(f"❌ 저장 실패: {pair_id}")
-                return False
-                
         except Exception as e:
-            print(f"❌ 궤적 생성 오류 ({pair_id}): {e}")
-            return False
+            print(f"❌ 궤적 생성 오류: {e}")
+            return None
     
-    def generate_batch(self, 
-                      pair_count: int,
-                      use_existing_poses: bool = False,
-                      existing_poses_file: Optional[str] = None) -> Dict[str, Any]:
-        """배치 궤적 생성"""
-        print(f"🚀 배치 궤적 생성 시작")
-        print(f"   환경: {self.env_name}")
-        print(f"   목표 궤적 수: {pair_count}")
-        print(f"   기존 pose 사용: {use_existing_poses}")
+    def generate_batch(self, env_count: int, pair_count: int, start_env_id: int = 0) -> Dict[str, Any]:
+        """
+        환경 묶음별 배치 궤적 생성
+        
+        Args:
+            env_count: 생성할 환경 수
+            pair_count: 각 환경당 생성할 pose pair 수
+            start_env_id: 시작 환경 인덱스
+            
+        Returns:
+            결과 통계
+        """
+        print(f"\n🚀 배치 궤적 생성 시작")
+        print(f"   환경 묶음: {self.env_set_name}")
+        print(f"   사용 가능한 환경: {len(self.available_environments)}개")
+        print(f"   처리할 환경 수: {env_count}")
+        print(f"   시작 인덱스: {start_env_id}")
+        print(f"   각 환경당 pair 수: {pair_count}")
+        
+        # 인덱스 범위 검증
+        end_env_id = min(start_env_id + env_count, len(self.available_environments))
+        actual_env_count = end_env_id - start_env_id
+        
+        if actual_env_count <= 0:
+            raise ValueError(f"유효하지 않은 환경 범위: {start_env_id} ~ {end_env_id}")
+        
+        # HDF5 파일 초기화
+        self._initialize_trajectory_file()
         
         batch_start_time = time.time()
         
-        # 1. HDF5 파일 초기화
-        if not self.initialize_data_manager([-5.0, 5.0, -5.0, 5.0]):
-            return {'success': False, 'error': 'Failed to initialize data manager'}
+        # 각 환경 처리
+        with h5py.File(self.trajectory_file, 'a') as f:
+            for env_idx in range(start_env_id, end_env_id):
+                env_name = self.available_environments[env_idx]
+                print(f"\n📁 환경 처리 중: {env_name} ({env_idx - start_env_id + 1}/{actual_env_count})")
+                print(f"   환경 인덱스: {env_idx}/{len(self.available_environments)}")
+                
+                # Pose pairs 로드
+                pose_pairs = self.pose_manager.get_pose_pairs(
+                    env_name, 
+                    self.rrt_config['rigid_body_id']
+                )
+                
+                if not pose_pairs:
+                    print(f"⚠️ Pose pairs 없음: {env_name}")
+                    continue
+                
+                print(f"✅ Pose pairs 로드: {len(pose_pairs)}개")
+                
+                # 환경 그룹 생성
+                if env_name not in f:
+                    env_group = f.create_group(env_name)
+                else:
+                    env_group = f[env_name]
+                
+                # 각 pose pair 처리
+                successful_pairs = 0
+                # pose_pairs가 tuple이면 첫 번째 요소가 실제 데이터
+                if isinstance(pose_pairs, tuple):
+                    pose_array = pose_pairs[0]  # numpy array [N, 12]
+                else:
+                    pose_array = pose_pairs
+                
+                for pair_idx in range(min(pair_count, len(pose_array))):
+                    # pose_array의 각 행: [start_x, start_y, 0, 0, 0, start_yaw, end_x, end_y, 0, 0, 0, end_yaw]
+                    pair_data = pose_array[pair_idx]
+                    start_pose = [pair_data[0], pair_data[1], pair_data[5]]  # [x, y, yaw]
+                    end_pose = [pair_data[6], pair_data[7], pair_data[11]]   # [x, y, yaw]
+                    
+                    print(f"🛤️ Pair {pair_idx}: [{start_pose[0]:.2f}, {start_pose[1]:.2f}, {start_pose[2]:.2f}] → "
+                          f"[{end_pose[0]:.2f}, {end_pose[1]:.2f}, {end_pose[2]:.2f}]")
+                    
+                    # 궤적 생성 및 스무딩
+                    result = self._process_trajectory(env_name, pair_idx, start_pose, end_pose)
+                    
+                    if result:
+                        # HDF5에 저장
+                        pair_group_name = str(pair_idx)
+                        if pair_group_name in env_group:
+                            del env_group[pair_group_name]
+                        
+                        pair_group = env_group.create_group(pair_group_name)
+                        
+                        # 궤적 데이터 저장 (형식에 따른 압축 설정)
+                        compression_opts = 6 if self.output_format == 'se3' else 9
+                        pair_group.create_dataset('raw_trajectory', 
+                                                 data=result['raw_trajectory'],
+                                                 compression='gzip',
+                                                 compression_opts=compression_opts)
+                        pair_group.create_dataset('smooth_trajectory',
+                                                 data=result['smooth_trajectory'],
+                                                 compression='gzip',
+                                                 compression_opts=compression_opts)
+                        
+                        # 메타데이터 저장
+                        pair_group.attrs['start_pose'] = result['start_pose']
+                        pair_group.attrs['end_pose'] = result['end_pose']
+                        pair_group.attrs['generation_time'] = result['generation_time']
+                        pair_group.attrs['path_length'] = result['path_length']
+                        pair_group.attrs['waypoint_count'] = result['waypoint_count']
+                        # 스무딩된 궤적의 경로 길이 별도 계산
+                        def path_length(traj):
+                            diffs = np.diff(traj[:, :2], axis=0)
+                            return np.sum(np.linalg.norm(diffs, axis=1))
+                        
+                        pair_group.attrs['raw_path_length'] = path_length(result['raw_trajectory'])
+                        pair_group.attrs['raw_waypoint_count'] = len(result['raw_trajectory'])
+                        pair_group.attrs['smooth_path_length'] = path_length(result['smooth_trajectory'])
+                        pair_group.attrs['smooth_waypoint_count'] = len(result['smooth_trajectory'])
+                        pair_group.attrs['smoothing_degree'] = result['smoothing_degree']
+                        pair_group.attrs['smoothing_factor'] = result['smoothing_factor']
+                        pair_group.attrs['output_format'] = result['output_format']
+                        pair_group.attrs['timestamp'] = time.strftime('%Y-%m-%d %H:%M:%S')
+                        
+                        successful_pairs += 1
+                        self.stats['total_pairs'] += 1
+                    
+                print(f"📊 환경 '{env_name}' 완료: {successful_pairs}/{pair_count} 성공")
+                self.stats['total_environments'] += 1
+                
+                # 주기적으로 flush
+                if self.stats['total_environments'] % 5 == 0:
+                    f.flush()
         
-        # 2. Pose pair 준비
-        if use_existing_poses and existing_poses_file:
-            print(f"📁 기존 pose 파일 로드: {existing_poses_file}")
-            # TODO: 기존 pose 파일 로드 로직 구현
-            pose_pairs = self.generate_pose_pairs(pair_count)
-        else:
-            pose_pairs = self.generate_pose_pairs(pair_count)
-        
-        if not pose_pairs:
-            return {'success': False, 'error': 'Failed to generate pose pairs'}
-        
-        # 3. 궤적 생성 루프
-        successful_count = 0
-        
-        for i, (start_pose, end_pose) in enumerate(pose_pairs):
-            pair_id = f"pair_{i+1:06d}"
-            
-            print(f"\n--- 궤적 {i+1}/{len(pose_pairs)} ---")
-            
-            self.stats['total_attempts'] += 1
-            
-            success = self.generate_single_trajectory(start_pose, end_pose, pair_id)
-            if success:
-                successful_count += 1
-            
-            # 진행상황 출력
-            if (i + 1) % 10 == 0:
-                success_rate = (successful_count / (i + 1)) * 100
-                avg_time = self.stats['total_time'] / (i + 1)
-                print(f"\n📊 중간 통계 ({i+1}/{len(pose_pairs)})")
-                print(f"   성공률: {success_rate:.1f}%")
-                print(f"   평균 시간: {avg_time:.2f}초/궤적")
-        
-        # 4. 최종 결과
+        # 최종 통계
         batch_time = time.time() - batch_start_time
-        
-        final_stats = self.data_manager.get_summary_stats()
-        
-        result = {
-            'success': True,
-            'env_name': self.env_name,
-            'total_attempts': self.stats['total_attempts'],
-            'successful_trajectories': successful_count,
-            'success_rate': (successful_count / self.stats['total_attempts']) * 100,
-            'batch_time': batch_time,
-            'avg_time_per_trajectory': batch_time / self.stats['total_attempts'],
-            'rrt_success_rate': (self.stats['successful_rrt'] / self.stats['total_attempts']) * 100,
-            'smooth_success_rate': (self.stats['successful_smooth'] / self.stats['total_attempts']) * 100,
-            'collision_free_rate': (self.stats['collision_free'] / self.stats['total_attempts']) * 100 if self.validation_enabled else None,
-            'h5_file_path': str(self.data_manager.h5_file_path),
-            'final_stats': final_stats
-        }
+        self.stats['total_time'] = batch_time
         
         print(f"\n🎉 배치 생성 완료!")
-        print(f"   성공한 궤적: {successful_count}/{self.stats['total_attempts']}")
-        print(f"   성공률: {result['success_rate']:.1f}%")
-        print(f"   총 소요시간: {batch_time:.1f}초")
-        print(f"   HDF5 파일: {self.data_manager.h5_file_path}")
+        print(f"   환경 묶음: {self.env_set_name}")
+        print(f"   처리된 환경: {self.stats['total_environments']}")
+        print(f"   총 pair 수: {self.stats['total_pairs']}")
+        print(f"   RRT 성공: {self.stats['successful_rrt']}")
+        print(f"   스무딩 성공: {self.stats['successful_smoothing']}")
+        print(f"   성공률: {self.stats['successful_rrt'] / max(1, self.stats['total_pairs']) * 100:.1f}%")
+        print(f"   총 시간: {batch_time:.2f}초")
+        print(f"   평균 시간: {batch_time / max(1, self.stats['total_pairs']):.3f}초/pair")
+        print(f"   궤적 파일: {self.trajectory_file}")
         
-        return result
-
-
-def generate_trajectories_for_environment(env_name: str,
-                                        pointcloud_file: str,
-                                        pair_count: int = 100,
-                                        **kwargs) -> Dict[str, Any]:
-    """환경별 궤적 생성 메인 함수"""
+        return self.stats
     
-    generator = TrajectoryBatchGenerator(
-        env_name=env_name,
-        pointcloud_file=pointcloud_file,
-        **kwargs
-    )
-    
-    return generator.generate_batch(pair_count)
+    def _initialize_trajectory_file(self):
+        """HDF5 파일 초기화"""
+        with h5py.File(self.trajectory_file, 'a') as f:
+            # 메타데이터 그룹
+            if 'metadata' not in f:
+                meta_group = f.create_group('metadata')
+                meta_group.attrs['creation_time'] = time.strftime('%Y-%m-%d %H:%M:%S')
+                meta_group.attrs['env_set_name'] = self.env_set_name
+                meta_group.attrs['output_format'] = self.output_format
+                meta_group.attrs['rigid_body_id'] = self.rrt_config['rigid_body_id']
+                meta_group.attrs['rrt_range'] = self.rrt_config['range']
+                meta_group.attrs['smoothing_min_samples'] = self.smoothing_config['min_samples']
+                meta_group.attrs['smoothing_max_samples'] = self.smoothing_config['max_samples']
+                meta_group.attrs['smoothing_factor'] = self.smoothing_config['smooth_factor']
+            
+        print(f"✅ 궤적 파일 초기화 완료: {self.trajectory_file}")
 
 
 def main():
-    """CLI 메인 함수"""
-    parser = argparse.ArgumentParser(description="HDF5 기반 배치 궤적 생성")
+    parser = argparse.ArgumentParser(description='Batch trajectory generation with SE(3) smoothing')
     
-    parser.add_argument('--env-name', required=True, 
-                       help='환경 이름 (예: circle_env_000001)')
-    parser.add_argument('--pointcloud-file', required=True,
-                       help='환경 PLY 파일 경로')
-    parser.add_argument('--pair-count', type=int, default=100,
-                       help='생성할 궤적 쌍 개수 (기본값: 100)')
+    # 필수 인자
+    parser.add_argument('--env-set', type=str, required=True,
+                       help='Environment set name (e.g., circles_only)')
+    parser.add_argument('--pose-file', type=str, required=True,
+                       help='Pose HDF5 file name')
+    parser.add_argument('--env-count', type=int, required=True,
+                       help='Number of environments to process')
+    parser.add_argument('--pair-count', type=int, required=True,
+                       help='Number of trajectory pairs per environment')
+    
+    # 선택 인자
+    parser.add_argument('--start-env-id', type=int, default=0,
+                       help='Starting environment index (default: 0)')
     parser.add_argument('--rigid-body-id', type=int, default=3,
-                       help='Rigid body ID (기본값: 3)')
-    parser.add_argument('--safety-margin', type=float, default=0.05,
-                       help='안전 여유 거리 (기본값: 0.05)')
-    parser.add_argument('--use-existing-poses', action='store_true',
-                       help='기존 pose 파일 사용')
-    parser.add_argument('--existing-poses-file', 
-                       help='기존 pose 파일 경로')
-    parser.add_argument('--no-collision-check', action='store_true',
-                       help='충돌 검증 비활성화')
-    parser.add_argument('--rrt-range', type=float, default=0.5,
-                       help='RRT range 설정')
-    parser.add_argument('--rrt-max-time', type=float, default=5.0,
-                       help='RRT 최대 계획 시간')
-    parser.add_argument('--bspline-degree', type=int, default=3,
-                       help='B-spline 차수')
-    parser.add_argument('--output-json', action='store_true',
-                       help='JSON 형태로도 내보내기')
+                       help='Rigid body ID (default: 3)')
+    parser.add_argument('--rrt-range', type=float, default=0.25,
+                       help='RRT extension range (default: 0.25)')
+    parser.add_argument('--rrt-max-time', type=float, default=15.0,
+                       help='Maximum RRT planning time (default: 15.0)')
+    
+    # SE(3) 스무딩 설정
+    parser.add_argument('--min-samples', type=int, default=100,
+                       help='Minimum samples after resampling (default: 100)')
+    parser.add_argument('--max-samples', type=int, default=500,
+                       help='Maximum samples after resampling (default: 500)')
+    parser.add_argument('--smooth-factor', type=float, default=0.01,
+                       help='Smoothing factor (default: 0.01)')
+    parser.add_argument('--degree', type=int, default=3,
+                       help='B-spline degree (default: 3)')
+    
+    # 출력 형식
+    parser.add_argument('--output-format', type=str, default='se3_6d',
+                       choices=['se2', 'se3', 'se3_6d', 'quaternion_7d'],
+                       help='Trajectory output format (default: se3_6d)')
+    
+    # 기타
+    parser.add_argument('--no-validation', action='store_true',
+                       help='Skip collision validation')
+    parser.add_argument('--list-environments', action='store_true',
+                       help='List available environments and exit')
     
     args = parser.parse_args()
     
-    # 환경 파일 존재 확인
-    if not Path(args.pointcloud_file).exists():
-        print(f"❌ 환경 파일을 찾을 수 없습니다: {args.pointcloud_file}")
-        return 1
-    
     # RRT 설정
     rrt_config = {
-        'range': args.rrt_range,
+        'rigid_body_id': args.rigid_body_id,
         'max_planning_time': args.rrt_max_time,
-        'interpolate': True,
-        'simplify': True
+        'range': args.rrt_range
     }
     
-    # B-spline 설정
-    bspline_config = {
-        'degree': args.bspline_degree,
-        'smoothing_factor': 0.0,
-        'density_multiplier': 2
+    # 스무딩 설정
+    smoothing_config = {
+        'min_samples': args.min_samples,
+        'max_samples': args.max_samples,
+        'smooth_factor': args.smooth_factor,
+        'degree': args.degree
     }
     
-    # 궤적 생성 실행
     try:
-        result = generate_trajectories_for_environment(
-            env_name=args.env_name,
-            pointcloud_file=args.pointcloud_file,
-            pair_count=args.pair_count,
-            rigid_body_id=args.rigid_body_id,
-            safety_margin=args.safety_margin,
+        # 생성기 초기화
+        generator = TrajectoryBatchGenerator(
+            env_set_name=args.env_set,
+            pose_file=args.pose_file,
             rrt_config=rrt_config,
-            bspline_config=bspline_config,
-            validation_enabled=not args.no_collision_check
+            smoothing_config=smoothing_config,
+            validation_enabled=not args.no_validation,
+            output_format=args.output_format
         )
         
-        if result['success']:
-            print(f"\n✅ 궤적 생성 성공!")
-            
-            # JSON 내보내기 (선택적)
-            if args.output_json:
-                generator = TrajectoryBatchGenerator(args.env_name, args.pointcloud_file)
-                generator.data_manager = TrajectoryDataManager(args.env_name)
-                success = generator.data_manager.export_to_json()
-                if success:
-                    print(f"📁 JSON 파일 내보내기 완료")
-            
+        # 환경 목록 출력 모드
+        if args.list_environments:
+            print(f"\n📋 사용 가능한 환경 목록 ({len(generator.available_environments)}개):")
+            for i, env_name in enumerate(generator.available_environments[:20]):
+                print(f"   {i:4d}: {env_name}")
+            if len(generator.available_environments) > 20:
+                print(f"   ... 그리고 {len(generator.available_environments) - 20}개 더")
             return 0
-        else:
-            print(f"❌ 궤적 생성 실패: {result.get('error', 'Unknown error')}")
-            return 1
-            
-    except KeyboardInterrupt:
-        print(f"\n⚠️ 사용자에 의해 중단됨")
-        return 130
+        
+        # 배치 생성 실행
+        stats = generator.generate_batch(
+            env_count=args.env_count,
+            pair_count=args.pair_count,
+            start_env_id=args.start_env_id
+        )
+        
+        return 0
+        
     except Exception as e:
-        print(f"❌ 예상치 못한 오류: {e}")
+        print(f"❌ 오류 발생: {e}")
+        import traceback
+        traceback.print_exc()
         return 1
 
 
 if __name__ == "__main__":
-    exit(main())
+    sys.exit(main())

@@ -38,7 +38,7 @@ from rrt_connect import create_se3_planner, SE3TrajectoryResult
 sys.path.append(str(project_root / "packages" / "data_generator" / "pose"))
 from unified_pose_manager import UnifiedPoseManager
 
-print("✅ 필수 모듈 import 완료")
+print("✅ all essentials are imported")
 
 class RawTrajectoryBatchGenerator:
     """환경 묶음별 Raw 궤적 대량 생성기"""

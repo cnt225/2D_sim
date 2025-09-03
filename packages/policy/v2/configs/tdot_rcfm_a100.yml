@@ -1,0 +1,99 @@
+wandb:
+  entity: cnt225-seoul-national-university
+  project_name: tdot_rcfm_a100
+  
+data:
+  train:
+    dataset: TdotHDF5
+    hdf5_path: ../../../data/Tdot/circles_only_integrated_trajs_Tdot.h5
+    pointcloud_root: ../../../data/pointcloud/circle_envs
+    split: train
+    max_trajectories: 1600  # 80% of 2000 trajectories
+    augmentation: True
+    batch_size: 128  # A100 can handle much larger batches
+    num_workers: 8  # More parallel loading
+    num_points: 2048
+    trajectory_length: 100
+    step_size: 1
+    
+  valid:
+    dataset: TdotHDF5
+    hdf5_path: ../../../data/Tdot/circles_only_integrated_trajs_Tdot.h5
+    pointcloud_root: ../../../data/pointcloud/circle_envs
+    split: val
+    max_trajectories: 200  # 10% of 2000 trajectories
+    augmentation: False
+    batch_size: 128
+    num_workers: 8
+    num_points: 2048
+    trajectory_length: 100
+    step_size: 1
+    
+  test:
+    dataset: TdotHDF5
+    hdf5_path: ../../../data/Tdot/circles_only_integrated_trajs_Tdot.h5
+    pointcloud_root: ../../../data/pointcloud/circle_envs
+    split: test
+    max_trajectories: 200
+    augmentation: False
+    batch_size: 128
+    num_workers: 8
+    num_points: 2048
+    trajectory_length: 100
+    step_size: 1
+    
+model:
+  arch: motion_rcfm
+  prob_path: OT
+  init_dist:
+    arch: uniform
+    radius: 1
+  velocity_field:
+    arch: vf_fc_motion
+    in_dim: 13
+    lat_dim: 2048
+    out_dim: 6
+    l_hidden: [2048, 1024, 512, 512, 512]
+    activation: ['relu', 'relu', 'relu', 'relu', 'relu']
+    out_activation: 'linear'
+  latent_feature:
+    arch: dgcnn
+    emb_dims: 1024
+    k: 20
+    dropout: 0.5
+    mode: 'maxavg'
+  ode_solver:
+    arch: RK4
+    n_steps: 20
+    
+training:
+  n_epoch: 500  # Reduced due to faster convergence with large batch
+  print_interval: 20
+  val_interval: 10  # More frequent validation
+  eval_interval: 50
+  vis_interval: 50
+  save_interval: 50
+  optimizer:
+    name: adam
+    lr: 0.0008  # sqrt(128/4) * 0.0001 ≈ 0.00057, rounded up
+    weight_decay: 0.0001
+  scheduler:
+    name: cosineannealingwarmrestarts
+    T_0: 100  # Shorter cycles
+    T_mult: 2
+    eta_min: 0.00001
+    warmup_epochs: 20  # Shorter warmup
+  gradient_clip_norm: 1.0
+  mixed_precision: True  # Enable AMP for A100
+  gradient_accumulation: 1  # No accumulation needed with large batch
+  loss:
+    type: mse
+    weight: 1.0
+    
+trainer: motion
+logger:
+  endwith: ['@', '#', '$', '%']
+  
+test:
+  num_test_trajectories: 50
+  visualization: True

@@ -10,6 +10,7 @@ trajectory/
 ├── requirements.txt                     # Python 의존성
 ├── batch_generate_raw_trajectories.py  # 🔥 주요 스크립트: Raw 궤적 대량 생성
 ├── batch_smooth_trajectories.py        # 궤적 스무딩 처리
+├── generate_tdot_trajectories.py       # 🔥 주요 스크립트: Tdot 속도 궤적 생성
 ├── trajectory_data_manager.py          # HDF5 데이터 관리
 ├── trajectory_validator.py             # 궤적 충돌 검증
 ├── rrt_connect/                        # RRT-Connect 플래너
@@ -20,7 +21,7 @@ trajectory/
 │   ├── trajectory_smoother.py          # B-spline 스무딩
 │   ├── trajectory_visualizer.py        # HDF5 기반 시각화 (구버전)
 │   └── simple_trajectory_visualizer.py # 새 HDF5 구조용 시각화
-└── batch_generate_trajectories.py      # 레거시: 전체 파이프라인 (참고용)
+└── batch_generate_trajectories.py      # 🔥 주요 스크립트: 통합 파이프라인 (RRT + 스무딩)
 ```
 
 ## 🎯 주요 기능
@@ -39,7 +40,13 @@ trajectory/
 - **기능**: 생성된 궤적의 충돌 여부 검증
 - **방법**: 커스텀 Python/NumPy 충돌 검출기
 
-### 4. 시각화
+### 4. Tdot 속도 궤적 생성 (NEW!)
+- **입력**: 스무딩된 궤적 데이터
+- **알고리즘**: SE(3) body twist 계산
+- **시간 정책**: 균등 할당 또는 곡률 기반 할당
+- **출력**: Tdot 속도 궤적 (모델 학습용)
+
+### 5. 시각화
 - **정적 이미지**: 환경과 궤적을 함께 표시
 - **애니메이션**: 궤적 재생 동영상 생성
 
@@ -77,7 +84,25 @@ root/data/trajectory/
 
 ## 🛠️ 사용법
 
-### 1. Raw 궤적 대량 생성
+### 1. Tdot 속도 궤적 생성 (NEW!)
+
+```bash
+# 균등 시간 할당 (dt=0.01s)
+python generate_tdot_trajectories.py --input circles_only_integrated_trajs.h5 --dt 0.01
+
+# 곡률 기반 시간 할당
+python generate_tdot_trajectories.py --input circles_only_integrated_trajs.h5 \
+    --time-policy curvature \
+    --v-ref 0.4 --v-cap 0.5 --a-lat-max 1.0
+
+# 6D 벡터 형식으로 저장 (기본은 4x4 행렬)
+python generate_tdot_trajectories.py --input circles_only_integrated_trajs.h5 \
+    --save-format 6d --dt 0.01
+
+# 출력: root/data/Tdot/<input_name>_Tdot.h5
+```
+
+### 2. Raw 궤적 대량 생성
 
 ```bash
 # 기본 사용법
@@ -99,7 +124,7 @@ python batch_generate_raw_trajectories.py \
     --rigid-body-id 3
 ```
 
-### 2. 사용 가능한 환경 목록 확인
+### 3. 사용 가능한 환경 목록 확인
 
 ```bash
 python batch_generate_raw_trajectories.py \

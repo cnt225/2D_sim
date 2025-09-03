@@ -1,0 +1,101 @@
+data:
+  test:
+    augmentation: false
+    batch_size: 32
+    dataset: TdotHDF5
+    hdf5_path: ../../../data/Tdot/circles_only_integrated_trajs_Tdot.h5
+    max_trajectories: 200
+    num_points: 2048
+    num_workers: 4
+    pointcloud_root: ../../../data/pointcloud/circle_envs
+    split: test
+    step_size: 1
+    trajectory_length: 100
+  train:
+    augmentation: false
+    batch_size: 4
+    dataset: TdotHDF5
+    hdf5_path: ../../../data/Tdot/circles_only_integrated_trajs_Tdot.h5
+    max_trajectories: 10
+    num_points: 512
+    num_workers: 0
+    pointcloud_root: ../../../data/pointcloud/circle_envs
+    split: train
+    step_size: 1
+    trajectory_length: 100
+  valid:
+    augmentation: false
+    batch_size: 4
+    dataset: TdotHDF5
+    hdf5_path: ../../../data/Tdot/circles_only_integrated_trajs_Tdot.h5
+    max_trajectories: 5
+    num_points: 512
+    num_workers: 0
+    pointcloud_root: ../../../data/pointcloud/circle_envs
+    split: val
+    step_size: 1
+    trajectory_length: 100
+logger:
+  endwith:
+  - '@'
+  - '#'
+  - $
+  - '%'
+model:
+  arch: motion_rcfm
+  init_dist:
+    arch: uniform
+    radius: 1
+  latent_feature:
+    arch: dgcnn
+    dropout: 0.5
+    emb_dims: 1024
+    k: 20
+    mode: maxavg
+  ode_solver:
+    arch: RK4
+    n_steps: 20
+  prob_path: OT
+  velocity_field:
+    activation:
+    - relu
+    - relu
+    - relu
+    - relu
+    - relu
+    arch: vf_fc_motion
+    in_dim: 13
+    l_hidden:
+    - 2048
+    - 1024
+    - 512
+    - 512
+    - 512
+    lat_dim: 2048
+    out_activation: linear
+    out_dim: 6
+test:
+  num_test_trajectories: 50
+  visualization: true
+trainer: motion
+training:
+  eval_interval: 500
+  loss:
+    type: mse
+    weight: 1.0
+  n_epoch: 50
+  optimizer:
+    lr: 0.0001
+    name: adam
+    weight_decay: 0.0001
+  print_interval: 5
+  save_interval: 1000
+  scheduler:
+    T_max: 1000
+    eta_min: 1.0e-05
+    name: cosine
+  val_interval: 10
+  vis_interval: 500
+wandb:
+  entity: motion_planning
+  project_name: tdot_rcfm
