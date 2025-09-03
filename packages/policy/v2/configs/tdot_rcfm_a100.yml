@@ -10,7 +10,7 @@ data:
     split: train
     max_trajectories: 1600  # 80% of 2000 trajectories
     augmentation: True
-    batch_size: 128  # A100 can handle much larger batches
+    batch_size: 256  # A100 with 1TB RAM can handle very large batches
     num_workers: 8  # More parallel loading
     num_points: 2048
     trajectory_length: 100
@@ -23,7 +23,7 @@ data:
     split: val
     max_trajectories: 200  # 10% of 2000 trajectories
     augmentation: False
-    batch_size: 128
+    batch_size: 256
     num_workers: 8
     num_points: 2048
     trajectory_length: 100
@@ -36,7 +36,7 @@ data:
     split: test
     max_trajectories: 200
     augmentation: False
-    batch_size: 128
+    batch_size: 256
     num_workers: 8
     num_points: 2048
     trajectory_length: 100
@@ -75,7 +75,7 @@ training:
   save_interval: 50
   optimizer:
     name: adam
-    lr: 0.0008  # sqrt(128/4) * 0.0001 ≈ 0.00057, rounded up
+    lr: 0.0011  # sqrt(256/4) * 0.0001 ≈ 0.0008, rounded up to 0.0011
     weight_decay: 0.0001
   scheduler:
     name: cosineannealingwarmrestarts
